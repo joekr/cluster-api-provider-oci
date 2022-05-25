@@ -273,16 +273,12 @@ func (s *ClusterScope) GetLoadBalancer(ctx context.Context) (*networkloadbalance
 			return nil, errors.New("cluster api tags have been modified out of context")
 		}
 	}
-	lbs, err := s.LoadBalancerClient.ListNetworkLoadBalancers(ctx, networkloadbalancer.ListNetworkLoadBalancersRequest{
-		CompartmentId: common.String(s.GetCompartmentId()),
-		DisplayName:   common.String(s.GetControlPlaneLoadBalancerName()),
-	})
+	lbs, err := s.listNetworkLoadBalancers(ctx)
 	if err != nil {
-		s.Logger.Error(err, "Failed to list lb by name")
-		return nil, errors.Wrap(err, "failed to list lb by name")
+		return nil, err
 	}
 
-	for _, lb := range lbs.Items {
+	for _, lb := range lbs {
 		if s.IsResourceCreatedByClusterAPI(lb.FreeformTags) {
 			resp, err := s.LoadBalancerClient.GetNetworkLoadBalancer(ctx, networkloadbalancer.GetNetworkLoadBalancerRequest{
 				NetworkLoadBalancerId: lb.Id,
@@ -294,4 +290,32 @@ func (s *ClusterScope) GetLoadBalancer(ctx context.Context) (*networkloadbalance
 		}
 	}
 	return nil, nil
+}
+
+func (s *ClusterScope) listNetworkLoadBalancers(ctx context.Context) ([]networkloadbalancer.NetworkLoadBalancerSummary, error) {
+	req := networkloadbalancer.ListNetworkLoadBalancersRequest{
+		CompartmentId: common.String(s.GetCompartmentId()),
+		DisplayName:   common.String(s.GetControlPlaneLoadBalancerName()),
+	}
+	listNLBs := func(ctx context.Context, request networkloadbalancer.ListNetworkLoadBalancersRequest) (networkloadbalancer.ListNetworkLoadBalancersResponse, error) {
+		return s.LoadBalancerClient.ListNetworkLoadBalancers(ctx, req)
+	}
+
+	var nlbs []networkloadbalancer.NetworkLoadBalancerSummary
+	for resp, err := listNLBs(ctx, req); ; resp, err = listNLBs(ctx, req) {
+		if err != nil {
+			s.Logger.Error(err, "Failed to list lb by name")
+			return nlbs, errors.Wrap(err, "failed to list lb by name")
+		}
+
+		nlbs = append(nlbs, resp.Items...)
+
+		if resp.OpcNextPage == nil {
+			break
+		} else {
+			req.Page = resp.OpcNextPage
+		}
+	}
+
+	return nlbs, nil
 }

@@ -156,6 +156,7 @@ func TestInstanceReconciliation(t *testing.T) {
 							},
 						},
 					},
+					OpcNextPage: nil,
 				}, nil)
 			},
 		},

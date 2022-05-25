@@ -314,14 +314,29 @@ func (m *MachineScope) getMachineFromOCID(ctx context.Context, instanceID *strin
 func (m *MachineScope) GetMachineByDisplayName(ctx context.Context, name string) (*core.Instance, error) {
 	req := core.ListInstancesRequest{DisplayName: common.String(name),
 		CompartmentId: common.String(m.getCompartmentId())}
-	resp, err := m.ComputeClient.ListInstances(ctx, req)
-	if err != nil {
-		return nil, err
+	var instances []core.Instance
+
+	listInstancesFunc := func(ctx context.Context, request core.ListInstancesRequest) (core.ListInstancesResponse, error) {
+		return m.ComputeClient.ListInstances(ctx, req)
 	}
-	if len(resp.Items) == 0 {
+	for resp, err := listInstancesFunc(ctx, req); ; resp, err = listInstancesFunc(ctx, req) {
+		if err != nil {
+			return nil, err
+		}
+
+		instances = append(instances, resp.Items...)
+		if resp.OpcNextPage == nil {
+			// no more pages
+			break
+		} else {
+			req.Page = resp.OpcNextPage
+		}
+	}
+
+	if len(instances) == 0 {
 		return nil, nil
 	}
-	for _, instance := range resp.Items {
+	for _, instance := range instances {
 		if m.IsResourceCreatedByClusterAPI(instance.FreeformTags) {
 			return &instance, nil
 		}
