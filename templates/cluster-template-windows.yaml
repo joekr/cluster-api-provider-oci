@@ -96,7 +96,7 @@ spec:
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: OCIMachineTemplate
 metadata:
-  name: "${CLUSTER_NAME}-md-0"
+  name: "${CLUSTER_NAME}-md-win"
 spec:
   template:
     spec:
@@ -112,7 +112,7 @@ spec:
 apiVersion: bootstrap.cluster.x-k8s.io/v1alpha4
 kind: KubeadmConfigTemplate
 metadata:
-  name: "${CLUSTER_NAME}-md-0"
+  name: "${CLUSTER_NAME}-md-win"
 spec:
   template:
     spec:
@@ -121,21 +121,19 @@ spec:
           criSocket: npipe:////./pipe/containerd-containerd
           kubeletExtraArgs:
             cloud-provider: external
-            provider-id: oci://{{ ds["id"] }}
-            windows-priorityclass: ABOVE_NORMAL_PRIORITY_CLASS
+            provider-id: oci://{{ ds.meta_data["instance_id"] }}
             feature-gates: WindowsHostProcessContainers=true
             v: "2"
+            windows-priorityclass: ABOVE_NORMAL_PRIORITY_CLASS
           name: '{{ ds.meta_data["local_hostname"] }}'
-      users:
-        - groups: Administrators
-          name: capi
-          sshAuthorizedKeys:
-            - ${OCI_SSH_KEY:=""}
+      preKubeadmCommands:
+        - powershell C:\Windows\Setup\Scripts\enable_second_nic.ps1
+        - powershell C:\Users\opc\attach_secondary_vnic.ps1 > C:\Users\opc\attach_secondary_vnic_log.txt
 ---
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: MachineDeployment
 metadata:
-  name: "${CLUSTER_NAME}-md-0"
+  name: "${CLUSTER_NAME}-md-win"
 spec:
   clusterName: "${CLUSTER_NAME}"
   replicas: ${NODE_MACHINE_COUNT}
@@ -147,10 +145,10 @@ spec:
       version: "${KUBERNETES_VERSION}"
       bootstrap:
         configRef:
-          name: "${CLUSTER_NAME}-md-0"
+          name: "${CLUSTER_NAME}-md-win"
           apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
           kind: KubeadmConfigTemplate
       infrastructureRef:
-        name: "${CLUSTER_NAME}-md-0"
+        name: "${CLUSTER_NAME}-md-win"
         apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
         kind: OCIMachineTemplate
