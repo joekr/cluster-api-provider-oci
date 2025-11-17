@@ -187,7 +187,7 @@ var _ = Describe("Managed Workload cluster creation", func() {
 			e2eConfig.GetIntervals(specName, "wait-control-plane"))
 	})
 
-	It("Managed Cluster - Cluster Identity", func() {
+	It("Managed Cluster - Cluster Identity [DailyTests]", func() {
 		clusterName = getClusterName(clusterNamePrefix, "cls-iden")
 		input := clusterctl.ApplyClusterTemplateAndWaitInput{
 			ClusterProxy: bootstrapClusterProxy,
@@ -229,7 +229,7 @@ var _ = Describe("Managed Workload cluster creation", func() {
 		clusterctl.ApplyClusterTemplateAndWait(ctx, input, result)
 	})
 
-	It("Managed Cluster - Node Recycling", func() {
+	It("Managed Cluster - Node Recycling [DailyTests]", func() {
 		clusterName = getClusterName(clusterNamePrefix, "cls-iden")
 		input := clusterctl.ApplyClusterTemplateAndWaitInput{
 			ClusterProxy: bootstrapClusterProxy,
@@ -328,7 +328,7 @@ var _ = Describe("Managed Workload cluster creation", func() {
 		}, retryableOperationTimeout, retryableOperationInterval).Should(Succeed(), "Failed to install Addon")
 	})
 
-	It("Managed Cluster - Self managed nodes", func() {
+	It("Managed Cluster - Self managed nodes [DailyTests]", func() {
 		clusterName = getClusterName(clusterNamePrefix, "self")
 		input := clusterctl.ApplyClusterTemplateAndWaitInput{
 			ClusterProxy: bootstrapClusterProxy,
