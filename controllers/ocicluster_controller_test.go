@@ -30,13 +30,16 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1beta2 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 )
+
 
 var (
 	MockTestRegion = "us-austin-1"
@@ -84,7 +87,7 @@ func TestOCIClusterReconciler_Reconcile(t *testing.T) {
 			defer teardown(t, g)
 			setup(t, g)
 
-			client := fake.NewClientBuilder().WithObjects(tc.objects...).Build()
+			client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(tc.objects...).Build()
 			r = OCIClusterReconciler{
 				Client:   client,
 				Scheme:   runtime.NewScheme(),
@@ -127,7 +130,7 @@ func TestOCIClusterReconciler_reconcile(t *testing.T) {
 			Status:     infrastructurev1beta2.OCIClusterStatus{},
 		}
 		recorder = record.NewFakeRecorder(20)
-		client := fake.NewClientBuilder().WithObjects(getSecret()).Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(getSecret()).Build()
 		r = OCIClusterReconciler{
 			Client:   client,
 			Scheme:   runtime.NewScheme(),
@@ -425,7 +428,7 @@ func TestOCIClusterReconciler_reconcileDelete(t *testing.T) {
 			Status:     infrastructurev1beta2.OCIClusterStatus{},
 		}
 		recorder = record.NewFakeRecorder(10)
-		client := fake.NewClientBuilder().WithObjects(getSecret()).Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(getSecret()).Build()
 		r = OCIClusterReconciler{
 			Client:   client,
 			Scheme:   runtime.NewScheme(),
@@ -710,18 +713,21 @@ func getOCIClusterWithOwner() *infrastructurev1beta2.OCICluster {
 	return ociCluster
 }
 
-func getPausedInfraCluster() *clusterv1.Cluster {
-	infraRef := corev1.ObjectReference{
-		Name: "oci-cluster",
+func getPausedInfraCluster() *clusterv1beta2.Cluster {
+	infraRef := clusterv1beta2.ContractVersionedObjectReference{
+		APIGroup: "infrastructure.cluster.x-k8s.io",
+		Kind:     "OCICluster",
+		Name:     "oci-cluster",
 	}
-	return &clusterv1.Cluster{
+	paused := true
+	return &clusterv1beta2.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-cluster",
 			Namespace: "test",
 		},
-		Spec: clusterv1.ClusterSpec{
-			InfrastructureRef: &infraRef,
-			Paused:            true,
+		Spec: clusterv1beta2.ClusterSpec{
+			InfrastructureRef: infraRef,
+			Paused:            &paused,
 		},
 	}
 }

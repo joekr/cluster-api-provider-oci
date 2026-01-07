@@ -30,11 +30,13 @@ import (
 	"github.com/oracle/oci-go-sdk/v65/core"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expclusterv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	expclusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 )
+
 
 func TestInstanceConfigCreate(t *testing.T) {
 	var (
@@ -126,7 +128,7 @@ func TestInstanceConfigCreate(t *testing.T) {
 			},
 			Spec: infrav2exp.OCIMachinePoolSpec{},
 		}
-		client := fake.NewClientBuilder().WithStatusSubresource(machinePool).WithObjects(secret, machinePool).Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithStatusSubresource(machinePool).WithObjects(secret, machinePool).Build()
 		ms, err = NewMachinePoolScope(MachinePoolScopeParams{
 			ComputeManagementClient: computeManagementClient,
 			OCIMachinePool:          machinePool,
@@ -592,7 +594,7 @@ func TestInstancePoolCreate(t *testing.T) {
 			},
 			Spec: infrav2exp.OCIMachinePoolSpec{},
 		}
-		client := fake.NewClientBuilder().WithStatusSubresource(machinePool).WithObjects(secret, machinePool).Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithStatusSubresource(machinePool).WithObjects(secret, machinePool).Build()
 		ms, err = NewMachinePoolScope(MachinePoolScopeParams{
 			ComputeManagementClient: computeManagementClient,
 			OCIMachinePool:          machinePool,
@@ -775,7 +777,7 @@ func TestInstancePoolUpdate(t *testing.T) {
 			},
 			Spec: infrav2exp.OCIMachinePoolSpec{},
 		}
-		client := fake.NewClientBuilder().WithObjects(secret, machinePool).Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(secret, machinePool).Build()
 		ms, err = NewMachinePoolScope(MachinePoolScopeParams{
 			ComputeManagementClient: computeManagementClient,
 			OCIMachinePool:          machinePool,

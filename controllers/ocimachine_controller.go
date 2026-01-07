@@ -34,10 +34,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -81,40 +81,53 @@ func (r *OCIMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 	// Fetch the Machine.
-	machine, err := util.GetOwnerMachine(ctx, r.Client, ociMachine.ObjectMeta)
+	machineV2, err := util.GetOwnerMachine(ctx, r.Client, ociMachine.ObjectMeta)
 
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if machine == nil {
+	if machineV2 == nil {
 		r.Recorder.Eventf(ociMachine, corev1.EventTypeNormal, "OwnerRefNotSet", "Cluster Controller has not yet set OwnerRef")
 		logger.Info("Machine Controller has not yet set OwnerRef")
 		return ctrl.Result{}, nil
 	}
+
+	// Convert v1beta2 Machine to v1beta1 for scope compatibility
+	machine, err := cloudutil.ConvertMachineV1Beta2ToV1Beta1(machineV2)
+	if err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "failed to convert machine from v1beta2 to v1beta1")
+	}
+
 	logger = logger.WithValues("machine-name", ociMachine.Name)
 
 	// Fetch the Cluster.
-	cluster, err := util.GetClusterFromMetadata(ctx, r.Client, ociMachine.ObjectMeta)
+	clusterV2, err := util.GetClusterFromMetadata(ctx, r.Client, ociMachine.ObjectMeta)
 	if err != nil {
 		r.Recorder.Eventf(ociMachine, corev1.EventTypeWarning, "ClusterDoesNotExist", "Machine is missing cluster label or cluster does not exist")
 		logger.Info("Machine is missing cluster label or cluster does not exist")
 		return ctrl.Result{}, nil
 	}
 
+	// Convert v1beta2 Cluster to v1beta1 for scope compatibility
+	cluster, err := cloudutil.ConvertClusterV1Beta2ToV1Beta1(clusterV2)
+	if err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "failed to convert cluster from v1beta2 to v1beta1")
+	}
+
 	// Return early if the object or Cluster is paused.
-	if annotations.IsPaused(cluster, ociMachine) {
+	if annotations.IsPaused(clusterV2, ociMachine) {
 		logger.Info("OCIMachine or linked Cluster is marked as paused. Won't reconcile")
 		return ctrl.Result{}, nil
 	}
 
 	ociCluster := &infrastructurev1beta2.OCICluster{}
 	ociClusterName := client.ObjectKey{
-		Namespace: cluster.Namespace,
-		Name:      cluster.Spec.InfrastructureRef.Name,
+		Namespace: clusterV2.Namespace,
+		Name:      clusterV2.Spec.InfrastructureRef.Name,
 	}
 
 	var clusterAccessor scope.OCIClusterAccessor
-	if cluster.Spec.InfrastructureRef.Kind == "OCICluster" {
+	if clusterV2.Spec.InfrastructureRef.Kind == "OCICluster" {
 		if err := r.Client.Get(ctx, ociClusterName, ociCluster); err != nil {
 			logger.Info("Cluster is not available yet")
 			r.Recorder.Eventf(ociMachine, corev1.EventTypeWarning, "ClusterNotAvailable", "Cluster is not available yet")
@@ -123,12 +136,12 @@ func (r *OCIMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		clusterAccessor = scope.OCISelfManagedCluster{
 			OCICluster: ociCluster,
 		}
-	} else if cluster.Spec.InfrastructureRef.Kind == "OCIManagedCluster" {
+	} else if clusterV2.Spec.InfrastructureRef.Kind == "OCIManagedCluster" {
 		// check for oci managed cluster
 		ociManagedCluster := &infrastructurev1beta2.OCIManagedCluster{}
 		ociManagedClusterName := client.ObjectKey{
-			Namespace: cluster.Namespace,
-			Name:      cluster.Spec.InfrastructureRef.Name,
+			Namespace: clusterV2.Namespace,
+			Name:      clusterV2.Spec.InfrastructureRef.Name,
 		}
 		if err := r.Client.Get(ctx, ociManagedClusterName, ociManagedCluster); err != nil {
 
@@ -137,8 +150,8 @@ func (r *OCIMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			OCIManagedCluster: ociManagedCluster,
 		}
 	} else {
-		r.Recorder.Eventf(ociMachine, corev1.EventTypeWarning, "InfrastructureClusterTypeNotSupported", fmt.Sprintf("Infrastructure Cluster Type %s is not supported", cluster.Spec.InfrastructureRef.Kind))
-		return ctrl.Result{}, errors.New(fmt.Sprintf("Infrastructure Cluster Type %s is not supported", cluster.Spec.InfrastructureRef.Kind))
+		r.Recorder.Eventf(ociMachine, corev1.EventTypeWarning, "InfrastructureClusterTypeNotSupported", fmt.Sprintf("Infrastructure Cluster Type %s is not supported", clusterV2.Spec.InfrastructureRef.Kind))
+		return ctrl.Result{}, errors.New(fmt.Sprintf("Infrastructure Cluster Type %s is not supported", clusterV2.Spec.InfrastructureRef.Kind))
 	}
 
 	_, _, clients, err := cloudutil.InitClientsAndRegion(ctx, r.Client, r.Region, clusterAccessor, r.ClientProvider)
@@ -206,7 +219,7 @@ func (r *OCIMachineReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Ma
 			&clusterv1.Cluster{},
 			handler.EnqueueRequestsFromMapFunc(clusterToObjectFunc),
 			builder.WithPredicates(
-				predicates.ClusterUnpausedAndInfrastructureReady(mgr.GetScheme(), ctrl.LoggerFrom(ctx)),
+				predicates.ClusterPausedTransitionsOrInfrastructureProvisioned(mgr.GetScheme(), ctrl.LoggerFrom(ctx)),
 			),
 		).
 		// don't queue reconcile if resource is paused

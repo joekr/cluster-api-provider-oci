@@ -29,10 +29,12 @@ import (
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/core"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 )
+
 
 func TestDRGRPCAttachmentReconciliation(t *testing.T) {
 	var (
@@ -50,7 +52,7 @@ func TestDRGRPCAttachmentReconciliation(t *testing.T) {
 		mockCtrl = gomock.NewController(t)
 		vcnClient = mock_vcn.NewMockClient(mockCtrl)
 		peerVcnClient = mock_vcn.NewMockClient(mockCtrl)
-		client := fake.NewClientBuilder().Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).Build()
 		ociClusterAccessor = OCISelfManagedCluster{
 			&infrastructurev1beta2.OCICluster{
 				ObjectMeta: metav1.ObjectMeta{
@@ -844,7 +846,7 @@ func TestDRGRPCAttachmentDeletion(t *testing.T) {
 		var err error
 		mockCtrl = gomock.NewController(t)
 		vcnClient = mock_vcn.NewMockClient(mockCtrl)
-		client := fake.NewClientBuilder().Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).Build()
 		ociClusterAccessor = OCISelfManagedCluster{
 			&infrastructurev1beta2.OCICluster{
 				ObjectMeta: metav1.ObjectMeta{

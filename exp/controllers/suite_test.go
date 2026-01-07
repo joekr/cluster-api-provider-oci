@@ -22,10 +22,12 @@ import (
 
 	infrastructurev1beta2 "github.com/oracle/cluster-api-provider-oci/api/v1beta2"
 	infrav2exp "github.com/oracle/cluster-api-provider-oci/exp/api/v1beta2"
+	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/kubernetes/scheme"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expclusterv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1beta2 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	expclusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -37,8 +39,19 @@ func TestMain(m *testing.M) {
 }
 
 func setup() {
-	utilruntime.Must(infrastructurev1beta2.AddToScheme(scheme.Scheme))
-	utilruntime.Must(clusterv1.AddToScheme(scheme.Scheme))
-	utilruntime.Must(infrav2exp.AddToScheme(scheme.Scheme))
-	utilruntime.Must(expclusterv1.AddToScheme(scheme.Scheme))
+	utilruntime.Must(infrastructurev1beta2.AddToScheme(clientgoscheme.Scheme))
+	utilruntime.Must(clusterv1.AddToScheme(clientgoscheme.Scheme))
+	utilruntime.Must(clusterv1beta2.AddToScheme(clientgoscheme.Scheme))
+	utilruntime.Must(infrav2exp.AddToScheme(clientgoscheme.Scheme))
+	utilruntime.Must(expclusterv1.AddToScheme(clientgoscheme.Scheme))
+}
+
+func setupScheme() *runtime.Scheme {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = clusterv1.AddToScheme(scheme)
+	_ = clusterv1beta2.AddToScheme(scheme)
+	_ = infrastructurev1beta2.AddToScheme(scheme)
+	_ = infrav2exp.AddToScheme(scheme)
+	return scheme
 }

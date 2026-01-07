@@ -29,14 +29,27 @@ import (
 	"github.com/oracle/oci-go-sdk/v65/common"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2/klogr"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expclusterv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1beta2 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	expclusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
+
+func setupScheme() *runtime.Scheme {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = clusterv1.AddToScheme(scheme)
+	_ = clusterv1beta2.AddToScheme(scheme)
+	_ = infrastructurev1beta2.AddToScheme(scheme)
+	_ = infrav2exp.AddToScheme(scheme)
+	return scheme
+}
 
 func TestGetClusterIdentityFromRef(t *testing.T) {
 	testCases := []struct {
@@ -93,7 +106,7 @@ func TestGetClusterIdentityFromRef(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			client := fake.NewClientBuilder().WithObjects(tt.objects...).Build()
+			client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(tt.objects...).Build()
 			result, err := GetClusterIdentityFromRef(context.Background(), client, tt.namespace, tt.ref)
 			if tt.errorExpected {
 				g.Expect(err).To(Not(BeNil()))
@@ -168,7 +181,7 @@ func TestGetOrBuildClientFromIdentity(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			client := fake.NewClientBuilder().WithObjects(tt.objects...).Build()
+			client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(tt.objects...).Build()
 			_, err := GetOrBuildClientFromIdentity(context.Background(), client, tt.clusterIdentity, tt.defaultRegion, nil, tt.namespace)
 			if tt.errorExpected {
 				g.Expect(err).To(Not(BeNil()))
@@ -248,7 +261,7 @@ func TestIsClusterNamespaceAllowed(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			client := fake.NewClientBuilder().WithObjects(tt.objects...).Build()
+			client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(tt.objects...).Build()
 			result := IsClusterNamespaceAllowed(context.Background(), client, tt.allowedNamespaces, tt.namespace)
 			g.Expect(result).To(BeEquivalentTo(tt.expected))
 		})
@@ -296,7 +309,7 @@ func TestCreateClientProviderFromClusterIdentity(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			client := fake.NewClientBuilder().WithObjects(tt.objects...).Build()
+			client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(tt.objects...).Build()
 			_, err := CreateClientProviderFromClusterIdentity(context.Background(), client, tt.namespace, tt.defaultRegion, tt.clusterAccessor, tt.ref)
 			if tt.errorExpected {
 				g.Expect(err).To(Not(BeNil()))
@@ -449,7 +462,7 @@ func TestInitClientsAndRegion(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			client := fake.NewClientBuilder().WithObjects(tt.objects...).Build()
+			client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(tt.objects...).Build()
 			_, _, _, err := InitClientsAndRegion(context.Background(), client, tt.defaultRegion, tt.clusterAccessor, tt.clientProvider)
 			if tt.errorExpected {
 				g.Expect(err).To(Not(BeNil()))
@@ -518,7 +531,7 @@ func TestCreateManagedMachinesIfNotExists(t *testing.T) {
 				},
 			},
 			setup: func(t *test) {
-				t.client = interceptor.NewClient(fake.NewClientBuilder().WithObjects().Build(), interceptor.Funcs{
+				t.client = interceptor.NewClient(fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects().Build(), interceptor.Funcs{
 					Create: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 						m := obj.(*infrav2exp.OCIMachinePoolMachine)
 						t.createPoolMachines = append(t.createPoolMachines, *m)
@@ -567,7 +580,7 @@ func TestCreateManagedMachinesIfNotExists(t *testing.T) {
 				},
 			},
 			setup: func(t *test) {
-				t.client = interceptor.NewClient(fake.NewClientBuilder().WithObjects(&infrav2exp.OCIMachinePoolMachine{
+				t.client = interceptor.NewClient(fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(&infrav2exp.OCIMachinePoolMachine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test",
 						Namespace: "default",
@@ -640,7 +653,7 @@ func TestCreateManagedMachinesIfNotExists(t *testing.T) {
 						MachineType:  infrav2exp.SelfManaged,
 					},
 				}
-				t.client = interceptor.NewClient(fake.NewClientBuilder().WithStatusSubresource(m).WithObjects(m).Build(), interceptor.Funcs{
+				t.client = interceptor.NewClient(fake.NewClientBuilder().WithScheme(setupScheme()).WithStatusSubresource(m).WithObjects(m).Build(), interceptor.Funcs{
 					SubResourcePatch: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 						m := obj.(*infrav2exp.OCIMachinePoolMachine)
 						t.createPoolMachines = append(t.createPoolMachines, *m)
@@ -714,7 +727,7 @@ func TestDeleteManagedMachinesIfNotExists(t *testing.T) {
 				},
 			},
 			setup: func(t *test) {
-				t.client = interceptor.NewClient(fake.NewClientBuilder().WithObjects(&infrav2exp.OCIMachinePoolMachine{
+				t.client = interceptor.NewClient(fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(&infrav2exp.OCIMachinePoolMachine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test",
 						Namespace: "default",
@@ -726,7 +739,7 @@ func TestDeleteManagedMachinesIfNotExists(t *testing.T) {
 							{
 								Kind:       "Machine",
 								Name:       "test-machine",
-								APIVersion: clusterv1.GroupVersion.String(),
+								APIVersion: clusterv1beta2.GroupVersion.String(),
 							},
 						},
 					},
@@ -736,7 +749,7 @@ func TestDeleteManagedMachinesIfNotExists(t *testing.T) {
 						ProviderID:   common.String("oci://id-1"),
 						MachineType:  infrav2exp.SelfManaged,
 					},
-				}, &clusterv1.Machine{
+				}, &clusterv1beta2.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-machine",
 						Namespace: "default",
@@ -745,11 +758,16 @@ func TestDeleteManagedMachinesIfNotExists(t *testing.T) {
 							clusterv1.MachinePoolNameLabel: "test",
 						},
 					},
-					Spec: clusterv1.MachineSpec{},
+					Spec: clusterv1beta2.MachineSpec{},
 				}).Build(), interceptor.Funcs{
 					Delete: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
-						m := obj.(*clusterv1.Machine)
-						t.deletePoolMachines = append(t.deletePoolMachines, *m)
+						m := obj.(*clusterv1beta2.Machine)
+						// Convert to v1beta1 for test validation
+						v1Machine := clusterv1.Machine{
+							ObjectMeta: m.ObjectMeta,
+							Spec:       clusterv1.MachineSpec{},
+						}
+						t.deletePoolMachines = append(t.deletePoolMachines, v1Machine)
 						return nil
 					},
 				})
@@ -776,7 +794,7 @@ func TestDeleteManagedMachinesIfNotExists(t *testing.T) {
 				},
 			},
 			setup: func(t *test) {
-				t.client = interceptor.NewClient(fake.NewClientBuilder().WithObjects(&infrav2exp.OCIMachinePoolMachine{
+				t.client = interceptor.NewClient(fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(&infrav2exp.OCIMachinePoolMachine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test",
 						Namespace: "default",
@@ -824,7 +842,7 @@ func TestDeleteManagedMachinesIfNotExists(t *testing.T) {
 				},
 			},
 			setup: func(t *test) {
-				t.client = interceptor.NewClient(fake.NewClientBuilder().WithObjects(&infrav2exp.OCIMachinePoolMachine{
+				t.client = interceptor.NewClient(fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(&infrav2exp.OCIMachinePoolMachine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test",
 						Namespace: "default",
@@ -902,7 +920,7 @@ func TestGetOCIClientCertFromSecret(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			client := fake.NewClientBuilder().WithObjects(tt.objects...).Build()
+			client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(tt.objects...).Build()
 
 			// This should either panic or return an error
 			_, err := getOCIClientCertFromSecret(context.Background(), client, "default", tt.overrides)

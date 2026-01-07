@@ -29,7 +29,7 @@ import (
 	v1beta2 "github.com/oracle/cluster-api-provider-oci/exp/api/v1beta2"
 	conversion "k8s.io/apimachinery/pkg/conversion"
 	runtime "k8s.io/apimachinery/pkg/runtime"
-	clusterapiapiv1beta1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterapiapiv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	errors "sigs.k8s.io/cluster-api/errors"
 )
 

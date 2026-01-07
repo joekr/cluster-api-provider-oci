@@ -36,11 +36,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expclusterv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	expclusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -99,24 +99,31 @@ func (r *OCIVirtualMachinePoolReconciler) Reconcile(ctx context.Context, req ctr
 	logger = logger.WithValues("machinePool", machinePool.Name)
 
 	// Fetch the Cluster.
-	cluster, err := util.GetClusterFromMetadata(ctx, r.Client, ociVirtualMachinePool.ObjectMeta)
+	clusterV2, err := util.GetClusterFromMetadata(ctx, r.Client, ociVirtualMachinePool.ObjectMeta)
 	if err != nil {
 		r.Recorder.Eventf(ociVirtualMachinePool, corev1.EventTypeWarning, "ClusterDoesNotExist", "MachinePool is missing cluster label or cluster does not exist")
 		logger.Info("MachinePool is missing cluster label or cluster does not exist")
 		return reconcile.Result{}, nil
 	}
-	logger = logger.WithValues("cluster", cluster.Name)
+
+	// Convert v1beta2 Cluster to v1beta1 for scope compatibility
+	cluster, err := cloudutil.ConvertClusterV1Beta2ToV1Beta1(clusterV2)
+	if err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "failed to convert cluster from v1beta2 to v1beta1")
+	}
+
+	logger = logger.WithValues("cluster", clusterV2.Name)
 
 	// Return early if the object or Cluster is paused.
-	if annotations.IsPaused(cluster, ociVirtualMachinePool) {
+	if annotations.IsPaused(clusterV2, ociVirtualMachinePool) {
 		logger.Info("OCIMachinePool or linked Cluster is marked as paused. Won't reconcile")
 		return ctrl.Result{}, nil
 	}
 
 	ociManagedCluster := &infrastructurev1beta2.OCIManagedCluster{}
 	ociClusterName := client.ObjectKey{
-		Namespace: cluster.Namespace,
-		Name:      cluster.Spec.InfrastructureRef.Name,
+		Namespace: clusterV2.Namespace,
+		Name:      clusterV2.Spec.InfrastructureRef.Name,
 	}
 
 	if err := r.Client.Get(ctx, ociClusterName, ociManagedCluster); err != nil {
@@ -136,8 +143,8 @@ func (r *OCIVirtualMachinePoolReconciler) Reconcile(ctx context.Context, req ctr
 
 	controlPlane := &infrastructurev1beta2.OCIManagedControlPlane{}
 	controlPlaneRef := types.NamespacedName{
-		Name:      cluster.Spec.ControlPlaneRef.Name,
-		Namespace: cluster.Namespace,
+		Name:      clusterV2.Spec.ControlPlaneRef.Name,
+		Namespace: clusterV2.Namespace,
 	}
 
 	if err := r.Get(ctx, controlPlaneRef, controlPlane); err != nil {
@@ -204,7 +211,7 @@ func (r *OCIVirtualMachinePoolReconciler) SetupWithManager(ctx context.Context, 
 			&clusterv1.Cluster{},
 			handler.EnqueueRequestsFromMapFunc(clusterToObjectFunc),
 			builder.WithPredicates(
-				predicates.ClusterUnpausedAndInfrastructureReady(mgr.GetScheme(), ctrl.LoggerFrom(ctx)),
+				predicates.ClusterPausedTransitionsOrInfrastructureProvisioned(mgr.GetScheme(), ctrl.LoggerFrom(ctx)),
 			),
 		).
 		WithEventFilter(predicates.ResourceNotPaused(mgr.GetScheme(), ctrl.LoggerFrom(ctx))).

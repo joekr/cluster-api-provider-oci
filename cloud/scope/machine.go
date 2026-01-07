@@ -43,10 +43,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2/klogr"
 	"k8s.io/utils/pointer"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	capiUtil "sigs.k8s.io/cluster-api/util"
-	"sigs.k8s.io/cluster-api/util/conditions"
-	"sigs.k8s.io/cluster-api/util/patch"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -276,7 +275,7 @@ func (m *MachineScope) launchInstanceWithFaultDomainRetry(ctx context.Context, b
 		return nil, errors.New("machine scope is missing OCIMachine")
 	}
 
-	baseRetryToken := ociutil.GetOPCRetryToken(string(m.OCIMachine.UID))
+	baseRetryToken := ociutil.GetOPCRetryToken("%s", string(m.OCIMachine.UID))
 	var lastErr error
 	totalAttempts := len(faultDomains)
 
@@ -646,7 +645,7 @@ func (m *MachineScope) ReconcileCreateInstanceOnLB(ctx context.Context) error {
 					IpAddress: common.String(instanceIp),
 					Port:      common.Int(int(m.OCIClusterAccessor.GetControlPlaneEndpoint().Port)),
 				},
-				OpcRetryToken: ociutil.GetOPCRetryToken("%s-%s", "create-backend", string(m.OCIMachine.UID)),
+				OpcRetryToken: ociutil.GetOPCRetryToken("%s", "create-backend-"+string(m.OCIMachine.UID)),
 			})
 			if err != nil {
 				return err
@@ -683,7 +682,7 @@ func (m *MachineScope) ReconcileCreateInstanceOnLB(ctx context.Context) error {
 					Port:      common.Int(int(m.OCIClusterAccessor.GetControlPlaneEndpoint().Port)),
 					Name:      common.String(m.Name()),
 				},
-				OpcRetryToken: ociutil.GetOPCRetryToken("%s-%s", "create-backend", string(m.OCIMachine.UID)),
+				OpcRetryToken: ociutil.GetOPCRetryToken("%s", "create-backend-"+string(m.OCIMachine.UID)),
 			})
 			if err != nil {
 				return err
@@ -825,7 +824,13 @@ func (m *MachineScope) containsLBBackend(backendSet loadbalancer.BackendSet, bac
 
 // IsControlPlane returns true if the machine is a control plane.
 func (m *MachineScope) IsControlPlane() bool {
-	return capiUtil.IsControlPlaneMachine(m.Machine)
+	// Check if the machine has the control plane label
+	// This is equivalent to capiUtil.IsControlPlaneMachine but works with v1beta1 types
+	if m.Machine != nil && m.Machine.Labels != nil {
+		_, ok := m.Machine.Labels[clusterv1.MachineControlPlaneLabel]
+		return ok
+	}
+	return false
 }
 
 func (m *MachineScope) getCompartmentId() string {

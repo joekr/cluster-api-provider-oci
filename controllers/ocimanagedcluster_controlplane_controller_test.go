@@ -27,6 +27,7 @@ import (
 	infrastructurev1beta2 "github.com/oracle/cluster-api-provider-oci/api/v1beta2"
 	"github.com/oracle/cluster-api-provider-oci/cloud/ociutil"
 	"github.com/oracle/cluster-api-provider-oci/cloud/scope"
+	cloudutil "github.com/oracle/cluster-api-provider-oci/cloud/util"
 	"github.com/oracle/cluster-api-provider-oci/cloud/services/base/mock_base"
 	"github.com/oracle/cluster-api-provider-oci/cloud/services/containerengine/mock_containerengine"
 	"github.com/oracle/oci-go-sdk/v65/common"
@@ -38,13 +39,16 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expclusterv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1beta2 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	expclusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 )
+
 
 func TestControlPlaneReconciliation(t *testing.T) {
 	var (
@@ -63,7 +67,7 @@ func TestControlPlaneReconciliation(t *testing.T) {
 	}
 	notReadyCluster := &infrastructurev1beta2.OCIManagedCluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "oci-cluster",
+			Name:      "test-cluster",
 			Namespace: "test",
 		},
 		Status: infrastructurev1beta2.OCIManagedClusterStatus{
@@ -96,19 +100,19 @@ func TestControlPlaneReconciliation(t *testing.T) {
 		{
 			name:             "paused cluster",
 			errorExpected:    false,
-			objects:          []client.Object{getSecret(), getOCIManagedControlPlane(), getPausedCluster()},
+			objects:          []client.Object{getSecret(), getOCIManagedControlPlane(), getPausedManagedControlPlaneCluster()},
 			eventNotExpected: "ClusterDoesNotExist",
 		},
 		{
 			name:          "oci managedcluster does not exist",
 			errorExpected: false,
-			objects:       []client.Object{getSecret(), getOCIManagedControlPlane(), getCluster()},
+			objects:       []client.Object{getSecret(), getOCIManagedControlPlane(), getManagedControlPlaneCluster()},
 			expectedEvent: "ClusterNotAvailable",
 		},
 		{
 			name:          "oci managedcluster is not ready",
 			errorExpected: false,
-			objects:       []client.Object{getSecret(), getOCIManagedControlPlane(), getCluster(), notReadyCluster},
+			objects:       []client.Object{getSecret(), getOCIManagedControlPlane(), getManagedControlPlaneCluster(), notReadyCluster},
 			expectedEvent: "ClusterInfrastructureNotReady",
 		},
 	}
@@ -124,7 +128,7 @@ func TestControlPlaneReconciliation(t *testing.T) {
 			defer teardown(t, g)
 			setup(t, g)
 
-			client := fake.NewClientBuilder().WithObjects(tc.objects...).Build()
+			client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(tc.objects...).Build()
 			r = OCIManagedClusterControlPlaneReconciler{
 				Client:         client,
 				Scheme:         runtime.NewScheme(),
@@ -189,7 +193,7 @@ func TestControlPlaneReconciliationFunction(t *testing.T) {
 	setup := func(t *testing.T, g *WithT) {
 		var err error
 		mockCtrl = gomock.NewController(t)
-		client := fake.NewClientBuilder().WithObjects(getSecret(), getBootstrapSecret()).Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(getSecret(), getBootstrapSecret()).Build()
 		okeClient = mock_containerengine.NewMockClient(mockCtrl)
 		baseClient = mock_base.NewMockBaseClient(mockCtrl)
 		ociManagedControlPlane = getOCIManagedControlPlane()
@@ -197,10 +201,13 @@ func TestControlPlaneReconciliationFunction(t *testing.T) {
 		ociClusterAccess := scope.OCIManagedCluster{
 			OCIManagedCluster: ociCluster,
 		}
+		// Convert v1beta2 to v1beta1 for scope
+		cluster, err := cloudutil.ConvertClusterV1Beta2ToV1Beta1(getManagedControlPlaneCluster())
+		g.Expect(err).To(BeNil())
 		ms, err = scope.NewManagedControlPlaneScope(scope.ManagedControlPlaneScopeParams{
 			ContainerEngineClient:  okeClient,
 			OCIClusterAccessor:     ociClusterAccess,
-			Cluster:                getCluster(),
+			Cluster:                cluster,
 			Client:                 client,
 			OCIManagedControlPlane: ociManagedControlPlane,
 			BaseClient:             baseClient,
@@ -489,7 +496,7 @@ func TestControlPlaneDeletionFunction(t *testing.T) {
 	setup := func(t *testing.T, g *WithT) {
 		var err error
 		mockCtrl = gomock.NewController(t)
-		client := fake.NewClientBuilder().WithObjects(getSecret()).Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(getSecret()).Build()
 		okeClient = mock_containerengine.NewMockClient(mockCtrl)
 		baseClient = mock_base.NewMockBaseClient(mockCtrl)
 		ociManagedControlPlane = getOCIManagedControlPlane()
@@ -497,10 +504,13 @@ func TestControlPlaneDeletionFunction(t *testing.T) {
 		ociClusterAccess := scope.OCIManagedCluster{
 			OCIManagedCluster: ociCluster,
 		}
+		// Convert v1beta2 to v1beta1 for scope
+		cluster, err := cloudutil.ConvertClusterV1Beta2ToV1Beta1(getManagedControlPlaneCluster())
+		g.Expect(err).To(BeNil())
 		ms, err = scope.NewManagedControlPlaneScope(scope.ManagedControlPlaneScopeParams{
 			ContainerEngineClient:  okeClient,
 			OCIClusterAccessor:     ociClusterAccess,
-			Cluster:                getCluster(),
+			Cluster:                cluster,
 			Client:                 client,
 			OCIManagedControlPlane: ociManagedControlPlane,
 			BaseClient:             baseClient,
@@ -695,4 +705,28 @@ func getBootstrapSecret() *corev1.Secret {
 			"value": []byte("test"),
 		},
 	}
+}
+
+func getManagedControlPlaneCluster() *clusterv1beta2.Cluster {
+	infraRef := clusterv1beta2.ContractVersionedObjectReference{
+		APIGroup: "infrastructure.cluster.x-k8s.io",
+		Kind:     "OCIManagedCluster",
+		Name:     "test-cluster",
+	}
+	return &clusterv1beta2.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-cluster",
+			Namespace: "test",
+		},
+		Spec: clusterv1beta2.ClusterSpec{
+			InfrastructureRef: infraRef,
+		},
+	}
+}
+
+func getPausedManagedControlPlaneCluster() *clusterv1beta2.Cluster {
+	cluster := getManagedControlPlaneCluster()
+	paused := true
+	cluster.Spec.Paused = &paused
+	return cluster
 }

@@ -30,10 +30,12 @@ import (
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/loadbalancer"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 )
+
 
 func TestLBReconciliation(t *testing.T) {
 	var (
@@ -48,7 +50,7 @@ func TestLBReconciliation(t *testing.T) {
 		var err error
 		mockCtrl = gomock.NewController(t)
 		lbClient = mock_lb.NewMockLoadBalancerClient(mockCtrl)
-		client := fake.NewClientBuilder().Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).Build()
 		ociClusterAccessor = OCISelfManagedCluster{
 			&infrastructurev1beta2.OCICluster{
 				ObjectMeta: metav1.ObjectMeta{
@@ -688,7 +690,7 @@ func TestLBDeletion(t *testing.T) {
 		var err error
 		mockCtrl = gomock.NewController(t)
 		lbClient = mock_lb.NewMockLoadBalancerClient(mockCtrl)
-		client := fake.NewClientBuilder().Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).Build()
 		ociClusterAccessor = OCISelfManagedCluster{
 			&infrastructurev1beta2.OCICluster{
 				ObjectMeta: metav1.ObjectMeta{

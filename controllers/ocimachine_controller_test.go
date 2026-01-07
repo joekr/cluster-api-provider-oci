@@ -27,6 +27,7 @@ import (
 	infrastructurev1beta2 "github.com/oracle/cluster-api-provider-oci/api/v1beta2"
 	"github.com/oracle/cluster-api-provider-oci/cloud/ociutil"
 	"github.com/oracle/cluster-api-provider-oci/cloud/scope"
+	cloudutil "github.com/oracle/cluster-api-provider-oci/cloud/util"
 	"github.com/oracle/cluster-api-provider-oci/cloud/services/compute/mock_compute"
 	"github.com/oracle/cluster-api-provider-oci/cloud/services/networkloadbalancer/mock_nlb"
 	"github.com/oracle/cluster-api-provider-oci/cloud/services/vcn/mock_vcn"
@@ -40,8 +41,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1beta2 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -50,6 +52,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
 
 func TestMachineReconciliation(t *testing.T) {
 	var (
@@ -121,7 +124,7 @@ func TestMachineReconciliation(t *testing.T) {
 			defer teardown(t, g)
 			setup(t, g)
 
-			client := fake.NewClientBuilder().WithStatusSubresource(tc.objects...).WithObjects(tc.objects...).Build()
+			client := fake.NewClientBuilder().WithScheme(setupScheme()).WithStatusSubresource(tc.objects...).WithObjects(tc.objects...).Build()
 			r = OCIMachineReconciler{
 				Client:         client,
 				Scheme:         runtime.NewScheme(),
@@ -168,16 +171,23 @@ func TestNormalReconciliationFunction(t *testing.T) {
 	setup := func(t *testing.T, g *WithT) {
 		var err error
 		mockCtrl = gomock.NewController(t)
-		client := fake.NewClientBuilder().WithObjects(getSecret()).Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(getSecret()).Build()
 		computeClient = mock_compute.NewMockComputeClient(mockCtrl)
 		nlbClient = mock_nlb.NewMockNetworkLoadBalancerClient(mockCtrl)
 		vcnClient = mock_vcn.NewMockClient(mockCtrl)
 		wrClient = mock_workrequests.NewMockClient(mockCtrl)
-		machine := getMachine()
+		machineV2 := getMachine()
 		ociMachine = getOciMachine()
-		machine.Spec.Bootstrap.DataSecretName = common.String("bootstrap")
+		machineV2.Spec.Bootstrap.DataSecretName = common.String("bootstrap")
 		ociCluster := getOCICluster()
 		ociCluster.Spec.NetworkSpec.APIServerLB.LoadBalancerId = common.String("nlbid")
+
+		// Convert v1beta2 to v1beta1 for scope
+		machine, err := cloudutil.ConvertMachineV1Beta2ToV1Beta1(machineV2)
+		g.Expect(err).To(BeNil())
+		cluster, err := cloudutil.ConvertClusterV1Beta2ToV1Beta1(getCluster())
+		g.Expect(err).To(BeNil())
+
 		ms, err = scope.NewMachineScope(scope.MachineScopeParams{
 			ComputeClient:             computeClient,
 			NetworkLoadBalancerClient: nlbClient,
@@ -188,7 +198,7 @@ func TestNormalReconciliationFunction(t *testing.T) {
 			OCIClusterAccessor: scope.OCISelfManagedCluster{
 				OCICluster: ociCluster,
 			},
-			Cluster: getCluster(),
+			Cluster: cluster,
 			Client:  client,
 		})
 
@@ -459,7 +469,7 @@ func TestNormalReconciliationFunction(t *testing.T) {
 			expectedEvent:      "invalid lifecycle state TERMINATED",
 			conditionAssertion: []conditionAssertion{{infrastructurev1beta2.InstanceReadyCondition, corev1.ConditionFalse, clusterv1.ConditionSeverityError, infrastructurev1beta2.InstanceProvisionFailedReason}},
 			testSpecificSetup: func(t *test, machineScope *scope.MachineScope, computeClient *mock_compute.MockComputeClient, vcnClient *mock_vcn.MockClient, nlbclient *mock_nlb.MockNetworkLoadBalancerClient, wrclient *mock_workrequests.MockClient) {
-				fakeClient := fake.NewClientBuilder().WithObjects(getSecret()).Build()
+				fakeClient := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(getSecret()).Build()
 				if machineScope.Machine.ObjectMeta.Annotations == nil {
 					machineScope.Machine.ObjectMeta.Annotations = make(map[string]string)
 				}
@@ -865,7 +875,7 @@ func TestMachineReconciliationDelete(t *testing.T) {
 		now := metav1.NewTime(time.Now())
 		ociMachine.DeletionTimestamp = &now
 		controllerutil.AddFinalizer(ociMachine, infrastructurev1beta2.MachineFinalizer)
-		client := fake.NewClientBuilder().WithObjects(getSecret(), getMachine(), ociMachine, getCluster(), getOCICluster()).Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(getSecret(), getMachine(), ociMachine, getCluster(), getOCICluster()).Build()
 		clientProvider, err := scope.MockNewClientProvider(scope.MockOCIClients{
 			ComputeClient: computeClient,
 		})
@@ -934,16 +944,23 @@ func TestMachineReconciliationDeletionNormal(t *testing.T) {
 		ociMachine = getOciMachine()
 		ociMachine.DeletionTimestamp = &now
 		controllerutil.AddFinalizer(ociMachine, infrastructurev1beta2.MachineFinalizer)
-		machine := getMachine()
-		machine.Spec.Bootstrap.DataSecretName = common.String("bootstrap")
+		machineV2 := getMachine()
+		machineV2.Spec.Bootstrap.DataSecretName = common.String("bootstrap")
 		mockCtrl = gomock.NewController(t)
-		client := fake.NewClientBuilder().WithObjects(getSecret(), machine, ociMachine).Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(getSecret(), machineV2, ociMachine).Build()
 		computeClient = mock_compute.NewMockComputeClient(mockCtrl)
 		nlbClient = mock_nlb.NewMockNetworkLoadBalancerClient(mockCtrl)
 		vcnClient = mock_vcn.NewMockClient(mockCtrl)
 		ociCluster := getOCICluster()
 		ociCluster.UID = "uid"
 		ociCluster.Spec.NetworkSpec.APIServerLB.LoadBalancerId = common.String("nlbid")
+
+		// Convert v1beta2 to v1beta1 for scope
+		machine, err := cloudutil.ConvertMachineV1Beta2ToV1Beta1(machineV2)
+		g.Expect(err).To(BeNil())
+		cluster, err := cloudutil.ConvertClusterV1Beta2ToV1Beta1(getCluster())
+		g.Expect(err).To(BeNil())
+
 		ms, err = scope.NewMachineScope(scope.MachineScopeParams{
 			ComputeClient: computeClient,
 			OCIMachine:    ociMachine,
@@ -951,7 +968,7 @@ func TestMachineReconciliationDeletionNormal(t *testing.T) {
 			OCIClusterAccessor: scope.OCISelfManagedCluster{
 				OCICluster: ociCluster,
 			},
-			Cluster:                   getCluster(),
+			Cluster:                   cluster,
 			Client:                    client,
 			NetworkLoadBalancerClient: nlbClient,
 			VCNClient:                 vcnClient,
@@ -1225,30 +1242,32 @@ func getOciMachineWithNoOwner() *infrastructurev1beta2.OCIMachine {
 	return ociMachine
 }
 
-func getCluster() *clusterv1.Cluster {
-	infraRef := corev1.ObjectReference{
-		Name: "oci-cluster",
-		Kind: "OCICluster",
+func getCluster() *clusterv1beta2.Cluster {
+	infraRef := clusterv1beta2.ContractVersionedObjectReference{
+		APIGroup: "infrastructure.cluster.x-k8s.io",
+		Kind:     "OCICluster",
+		Name:     "oci-cluster",
 	}
-	return &clusterv1.Cluster{
+	return &clusterv1beta2.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-cluster",
 			Namespace: "test",
 		},
-		Spec: clusterv1.ClusterSpec{
-			InfrastructureRef: &infraRef,
+		Spec: clusterv1beta2.ClusterSpec{
+			InfrastructureRef: infraRef,
 		},
 	}
 }
 
-func getPausedCluster() *clusterv1.Cluster {
+func getPausedCluster() *clusterv1beta2.Cluster {
 	cluster := getCluster()
-	cluster.Spec.Paused = true
+	paused := true
+	cluster.Spec.Paused = &paused
 	return cluster
 }
 
-func getMachine() *clusterv1.Machine {
-	machine := &clusterv1.Machine{
+func getMachine() *clusterv1beta2.Machine {
+	machine := &clusterv1beta2.Machine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test",
 			Namespace: "test",

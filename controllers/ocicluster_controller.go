@@ -33,11 +33,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
-	"sigs.k8s.io/cluster-api/util/patch"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -84,18 +84,24 @@ func (r *OCIClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Fetch the Cluster.
-	cluster, err := util.GetOwnerCluster(ctx, r.Client, ociCluster.ObjectMeta)
+	clusterV2, err := util.GetOwnerCluster(ctx, r.Client, ociCluster.ObjectMeta)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if cluster == nil {
+	if clusterV2 == nil {
 		r.Recorder.Eventf(ociCluster, corev1.EventTypeNormal, "OwnerRefNotSet", "Cluster Controller has not yet set OwnerRef")
 		logger.Info("Cluster Controller has not yet set OwnerRef")
 		return ctrl.Result{}, nil
 	}
 
+	// Convert v1beta2 Cluster to v1beta1 for scope compatibility
+	cluster, err := cloudutil.ConvertClusterV1Beta2ToV1Beta1(clusterV2)
+	if err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "failed to convert cluster from v1beta2 to v1beta1")
+	}
+
 	// Return early if the object or Cluster is paused.
-	if annotations.IsPaused(cluster, ociCluster) {
+	if annotations.IsPaused(clusterV2, ociCluster) {
 		r.Recorder.Eventf(ociCluster, corev1.EventTypeNormal, "ClusterPaused", "Cluster is paused")
 		logger.Info("OCICluster or linked Cluster is marked as paused. Won't reconcile")
 		return ctrl.Result{}, nil
@@ -162,7 +168,7 @@ func (r *OCIClusterReconciler) reconcileComponent(ctx context.Context, cluster *
 	err := reconciler(ctx)
 	if err != nil {
 		r.Recorder.Event(cluster, corev1.EventTypeWarning, "ReconcileError", errors.Wrapf(err,
-			fmt.Sprintf("failed to reconcile %s", componentName)).Error())
+			"failed to reconcile %s", componentName).Error())
 		conditions.MarkFalse(cluster, infrastructurev1beta2.ClusterReadyCondition, failReason, clusterv1.ConditionSeverityError, "")
 		return errors.Wrapf(err, "failed to reconcile %s for OCICluster %s/%s", componentName, cluster.Namespace,
 			cluster.Name)

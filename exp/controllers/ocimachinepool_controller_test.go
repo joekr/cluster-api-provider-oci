@@ -25,6 +25,7 @@ import (
 	infrastructurev1beta2 "github.com/oracle/cluster-api-provider-oci/api/v1beta2"
 	"github.com/oracle/cluster-api-provider-oci/cloud/ociutil"
 	"github.com/oracle/cluster-api-provider-oci/cloud/scope"
+	cloudutil "github.com/oracle/cluster-api-provider-oci/cloud/util"
 	"github.com/oracle/cluster-api-provider-oci/cloud/services/computemanagement/mock_computemanagement"
 	infrav2exp "github.com/oracle/cluster-api-provider-oci/exp/api/v1beta2"
 	"github.com/oracle/oci-go-sdk/v65/common"
@@ -34,9 +35,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expclusterv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1beta2 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	expclusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -47,6 +49,7 @@ import (
 var (
 	MockTestRegion = "us-austin-1"
 )
+
 
 func TestMachinePoolReconciliation(t *testing.T) {
 	var (
@@ -112,7 +115,7 @@ func TestMachinePoolReconciliation(t *testing.T) {
 			defer teardown(t, g)
 			setup(t, g)
 
-			client := fake.NewClientBuilder().WithObjects(tc.objects...).Build()
+			client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(tc.objects...).Build()
 			r = OCIMachinePoolReconciler{
 				Client:         client,
 				Scheme:         runtime.NewScheme(),
@@ -212,14 +215,20 @@ func TestReconciliationFunction(t *testing.T) {
 		computeManagementClient = mock_computemanagement.NewMockClient(mockCtrl)
 		machinePool := getMachinePool()
 		ociMachinePool = getOCIMachinePool()
-		client := fake.NewClientBuilder().WithStatusSubresource(ociMachinePool).WithObjects(getSecret(), ociMachinePool).Build()
 		ociCluster := getOCIClusterWithOwner()
+		clusterv1beta2 := getCluster()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithStatusSubresource(ociMachinePool).WithObjects(getSecret(), ociMachinePool, ociCluster, machinePool, clusterv1beta2).Build()
+		// Convert v1beta2 to v1beta1 for scope
+		cluster, err := cloudutil.ConvertClusterV1Beta2ToV1Beta1(clusterv1beta2)
+		g.Expect(err).To(BeNil())
+		// Set InfrastructureReady on v1beta1 cluster (not preserved in JSON conversion from v1beta2)
+		cluster.Status.InfrastructureReady = true
 		ms, err = scope.NewMachinePoolScope(scope.MachinePoolScopeParams{
 			ComputeManagementClient: computeManagementClient,
 			OCIClusterAccessor: scope.OCISelfManagedCluster{
 				OCICluster: ociCluster,
 			},
-			Cluster:        getCluster(),
+			Cluster:        cluster,
 			Client:         client,
 			OCIMachinePool: ociMachinePool,
 			MachinePool:    machinePool,
@@ -310,7 +319,7 @@ func TestReconciliationFunction(t *testing.T) {
 					Shape:                   common.String("test-shape"),
 					InstanceConfigurationId: common.String("test"),
 				}
-				r.Client = interceptor.NewClient(fake.NewClientBuilder().WithObjects(getSecret(), ociMachinePool).Build(), interceptor.Funcs{
+				r.Client = interceptor.NewClient(fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(getSecret(), ociMachinePool).Build(), interceptor.Funcs{
 					Create: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 						m := obj.(*infrav2exp.OCIMachinePoolMachine)
 						t.createPoolMachines = append(t.createPoolMachines, *m)
@@ -381,7 +390,7 @@ func TestReconciliationFunction(t *testing.T) {
 					Shape:                   common.String("test-shape"),
 					InstanceConfigurationId: common.String("test"),
 				}
-				fakeClient := fake.NewClientBuilder().WithObjects(&infrav2exp.OCIMachinePoolMachine{
+				fakeClient := fake.NewClientBuilder().WithScheme(setupScheme()).WithStatusSubresource(ociMachinePool).WithObjects(&infrav2exp.OCIMachinePoolMachine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test",
 						Namespace: "test",
@@ -393,7 +402,7 @@ func TestReconciliationFunction(t *testing.T) {
 							{
 								Kind:       "Machine",
 								Name:       "test",
-								APIVersion: clusterv1.GroupVersion.String(),
+								APIVersion: clusterv1beta2.GroupVersion.String(),
 							},
 						},
 					},
@@ -403,7 +412,7 @@ func TestReconciliationFunction(t *testing.T) {
 						ProviderID:   common.String("id-2"),
 						MachineType:  infrav2exp.Managed,
 					},
-				}, &clusterv1.Machine{
+				}, &clusterv1beta2.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test",
 						Namespace: "test",
@@ -412,21 +421,27 @@ func TestReconciliationFunction(t *testing.T) {
 							clusterv1.MachinePoolNameLabel: "test",
 						},
 					},
-					Spec: clusterv1.MachineSpec{},
+					Spec: clusterv1beta2.MachineSpec{},
 				}).Build()
 				t.deletePoolMachines = make([]clusterv1.Machine, 0)
-				r.Client = interceptor.NewClient(fakeClient, interceptor.Funcs{
+				interceptorClient := interceptor.NewClient(fakeClient, interceptor.Funcs{
 					Create: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 						m := obj.(*infrav2exp.OCIMachinePoolMachine)
 						t.createPoolMachines = append(t.createPoolMachines, *m)
 						return nil
 					},
 					Delete: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
-						m := obj.(*clusterv1.Machine)
-						t.deletePoolMachines = append(t.deletePoolMachines, *m)
+						m := obj.(*clusterv1beta2.Machine)
+						// Convert to v1beta1 for test validation
+						v1Machine := clusterv1.Machine{
+							ObjectMeta: m.ObjectMeta,
+							Spec:       clusterv1.MachineSpec{},
+						}
+						t.deletePoolMachines = append(t.deletePoolMachines, v1Machine)
 						return nil
 					},
 				})
+				r.Client = interceptorClient
 				ms.MachinePool.Spec.Template.Spec.Bootstrap.DataSecretName = common.String("bootstrap")
 				ms.OCIMachinePool.Spec.OCID = common.String("pool-id")
 				computeManagementClient.EXPECT().GetInstanceConfiguration(gomock.Any(), gomock.Eq(core.GetInstanceConfigurationRequest{
@@ -542,6 +557,7 @@ func TestReconciliationFunction(t *testing.T) {
 			tc.testSpecificSetup(&tc, ms, computeManagementClient)
 			ctx := context.Background()
 			_, err := r.reconcileNormal(ctx, log.FromContext(ctx), ms)
+			g.Expect(ms.Close(ctx)).To(BeNil())
 			if len(tc.conditionAssertion) > 0 {
 				expectMachinePoolConditions(g, ociMachinePool, tc.conditionAssertion)
 			}
@@ -600,14 +616,20 @@ func TestDeleteeconciliationFunction(t *testing.T) {
 		computeManagementClient = mock_computemanagement.NewMockClient(mockCtrl)
 		machinePool := getMachinePool()
 		ociMachinePool = getOCIMachinePool()
-		client := fake.NewClientBuilder().WithObjects(getSecret(), ociMachinePool).Build()
 		ociCluster := getOCIClusterWithOwner()
+		clusterv1beta2 := getCluster()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithStatusSubresource(ociMachinePool).WithObjects(getSecret(), ociMachinePool, ociCluster, machinePool, clusterv1beta2).Build()
+		// Convert v1beta2 to v1beta1 for scope
+		cluster, err := cloudutil.ConvertClusterV1Beta2ToV1Beta1(clusterv1beta2)
+		g.Expect(err).To(BeNil())
+		// Set InfrastructureReady on v1beta1 cluster (not preserved in JSON conversion from v1beta2)
+		cluster.Status.InfrastructureReady = true
 		ms, err = scope.NewMachinePoolScope(scope.MachinePoolScopeParams{
 			ComputeManagementClient: computeManagementClient,
 			OCIClusterAccessor: scope.OCISelfManagedCluster{
 				OCICluster: ociCluster,
 			},
-			Cluster:        getCluster(),
+			Cluster:        cluster,
 			Client:         client,
 			OCIMachinePool: ociMachinePool,
 			MachinePool:    machinePool,
@@ -701,6 +723,7 @@ func TestDeleteeconciliationFunction(t *testing.T) {
 			tc.testSpecificSetup(ms, computeManagementClient)
 			ctx := context.Background()
 			_, err := r.reconcileDelete(ctx, ms)
+			g.Expect(ms.Close(ctx)).To(BeNil())
 			if len(tc.conditionAssertion) > 0 {
 				expectMachinePoolConditions(g, ociMachinePool, tc.conditionAssertion)
 			}
@@ -817,4 +840,43 @@ func getSecret() *corev1.Secret {
 			"value": []byte("test"),
 		},
 	}
+}
+
+func getMachinePool() *expclusterv1.MachinePool {
+	replicas := int32(3)
+	machinePool := &expclusterv1.MachinePool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "test",
+		},
+		Spec: expclusterv1.MachinePoolSpec{
+			Replicas: &replicas,
+			Template: clusterv1.MachineTemplateSpec{},
+		},
+	}
+	return machinePool
+}
+
+func getCluster() *clusterv1beta2.Cluster {
+	infraRef := clusterv1beta2.ContractVersionedObjectReference{
+		APIGroup: "infrastructure.cluster.x-k8s.io",
+		Kind:     "OCICluster",
+		Name:     "oci-cluster",
+	}
+	return &clusterv1beta2.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-cluster",
+			Namespace: "test",
+		},
+		Spec: clusterv1beta2.ClusterSpec{
+			InfrastructureRef: infraRef,
+		},
+	}
+}
+
+func getPausedCluster() *clusterv1beta2.Cluster {
+	cluster := getCluster()
+	paused := true
+	cluster.Spec.Paused = &paused
+	return cluster
 }

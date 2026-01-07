@@ -33,11 +33,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
-	"sigs.k8s.io/cluster-api/util/patch"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -83,18 +83,24 @@ func (r *OCIManagedClusterControlPlaneReconciler) Reconcile(ctx context.Context,
 		return ctrl.Result{}, err
 	}
 	// Fetch the Cluster.
-	cluster, err := util.GetOwnerCluster(ctx, r.Client, controlPlane.ObjectMeta)
+	clusterV2, err := util.GetOwnerCluster(ctx, r.Client, controlPlane.ObjectMeta)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if cluster == nil {
+	if clusterV2 == nil {
 		r.Recorder.Eventf(controlPlane, corev1.EventTypeNormal, "OwnerRefNotSet", "Cluster Controller has not yet set OwnerRef")
 		logger.Info("Cluster Controller has not yet set OwnerRef")
 		return ctrl.Result{}, nil
 	}
 
+	// Convert v1beta2 Cluster to v1beta1 for scope compatibility
+	cluster, err := cloudutil.ConvertClusterV1Beta2ToV1Beta1(clusterV2)
+	if err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "failed to convert cluster from v1beta2 to v1beta1")
+	}
+
 	// Return early if the object or Cluster is paused.
-	if annotations.IsPaused(cluster, controlPlane) {
+	if annotations.IsPaused(clusterV2, controlPlane) {
 		r.Recorder.Eventf(controlPlane, corev1.EventTypeNormal, "ClusterPaused", "Cluster is paused")
 		logger.Info("OCIManagedCluster or linked Cluster is marked as paused. Won't reconcile")
 		return ctrl.Result{}, nil
@@ -102,8 +108,8 @@ func (r *OCIManagedClusterControlPlaneReconciler) Reconcile(ctx context.Context,
 
 	ociManagedCluster := &infrastructurev1beta2.OCIManagedCluster{}
 	ociClusterName := client.ObjectKey{
-		Namespace: cluster.Namespace,
-		Name:      cluster.Spec.InfrastructureRef.Name,
+		Namespace: clusterV2.Namespace,
+		Name:      clusterV2.Spec.InfrastructureRef.Name,
 	}
 
 	if err := r.Client.Get(ctx, ociClusterName, ociManagedCluster); err != nil {
@@ -119,7 +125,7 @@ func (r *OCIManagedClusterControlPlaneReconciler) Reconcile(ctx context.Context,
 	}
 
 	// Return early if the object or Cluster is paused.
-	if annotations.IsPaused(cluster, ociManagedCluster) {
+	if annotations.IsPaused(clusterV2, ociManagedCluster) {
 		r.Recorder.Eventf(controlPlane, corev1.EventTypeNormal, "ClusterPaused", "Cluster is paused")
 		logger.Info("OCIManagedCluster or linked Cluster is marked as paused. Won't reconcile")
 		return ctrl.Result{}, nil
@@ -400,14 +406,14 @@ func OCIManagedClusterToOCIManagedControlPlaneMapper(c client.Client, log logr.L
 		}
 
 		ref := cluster.Spec.ControlPlaneRef
-		if ref == nil || ref.Name == "" {
+		if ref.Name == "" {
 			return nil
 		}
 
 		return []ctrl.Request{
 			{
 				NamespacedName: types.NamespacedName{
-					Namespace: ref.Namespace,
+					Namespace: cluster.Namespace,
 					Name:      ref.Name,
 				},
 			},

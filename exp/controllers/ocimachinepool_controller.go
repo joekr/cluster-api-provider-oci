@@ -37,11 +37,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expclusterv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	expclusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	"sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -100,25 +100,32 @@ func (r *OCIMachinePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	logger = logger.WithValues("machinePool", machinePool.Name)
 
 	// Fetch the Cluster.
-	cluster, err := util.GetClusterFromMetadata(ctx, r.Client, ociMachinePool.ObjectMeta)
+	clusterV2, err := util.GetClusterFromMetadata(ctx, r.Client, ociMachinePool.ObjectMeta)
 	if err != nil {
 		r.Recorder.Eventf(ociMachinePool, corev1.EventTypeWarning, "ClusterDoesNotExist", "MachinePool is missing cluster label or cluster does not exist")
 		logger.Info("MachinePool is missing cluster label or cluster does not exist")
 		return reconcile.Result{}, nil
 	}
-	logger = logger.WithValues("cluster", cluster.Name)
+
+	// Convert v1beta2 Cluster to v1beta1 for scope compatibility
+	cluster, err := cloudutil.ConvertClusterV1Beta2ToV1Beta1(clusterV2)
+	if err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "failed to convert cluster from v1beta2 to v1beta1")
+	}
+
+	logger = logger.WithValues("cluster", clusterV2.Name)
 
 	// Return early if the object or Cluster is paused.
-	if annotations.IsPaused(cluster, ociMachinePool) {
+	if annotations.IsPaused(clusterV2, ociMachinePool) {
 		logger.Info("OCIMachinePool or linked Cluster is marked as paused. Won't reconcile")
 		return ctrl.Result{}, nil
 	}
 	var clusterAccessor scope.OCIClusterAccessor
-	if cluster.Spec.InfrastructureRef.Kind == "OCICluster" {
+	if clusterV2.Spec.InfrastructureRef.Kind == "OCICluster" {
 		ociCluster := &infrastructurev1beta2.OCICluster{}
 		ociClusterName := client.ObjectKey{
-			Namespace: cluster.Namespace,
-			Name:      cluster.Spec.InfrastructureRef.Name,
+			Namespace: clusterV2.Namespace,
+			Name:      clusterV2.Spec.InfrastructureRef.Name,
 		}
 		if err := r.Client.Get(ctx, ociClusterName, ociCluster); err != nil {
 			logger.Info("Cluster is not available yet")
@@ -129,11 +136,11 @@ func (r *OCIMachinePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		clusterAccessor = scope.OCISelfManagedCluster{
 			OCICluster: ociCluster,
 		}
-	} else if cluster.Spec.InfrastructureRef.Kind == "OCIManagedCluster" {
+	} else if clusterV2.Spec.InfrastructureRef.Kind == "OCIManagedCluster" {
 		ociManagedCluster := &infrastructurev1beta2.OCIManagedCluster{}
 		ociManagedClusterName := client.ObjectKey{
-			Namespace: cluster.Namespace,
-			Name:      cluster.Spec.InfrastructureRef.Name,
+			Namespace: clusterV2.Namespace,
+			Name:      clusterV2.Spec.InfrastructureRef.Name,
 		}
 		if err := r.Client.Get(ctx, ociManagedClusterName, ociManagedCluster); err != nil {
 			logger.Info("Cluster is not available yet")
@@ -145,8 +152,8 @@ func (r *OCIMachinePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			OCIManagedCluster: ociManagedCluster,
 		}
 	} else {
-		r.Recorder.Eventf(ociMachinePool, corev1.EventTypeWarning, "InfrastructureClusterTypeNotSupported", fmt.Sprintf("Infrastructure Cluster Type %s is not supported", cluster.Spec.InfrastructureRef.Kind))
-		return ctrl.Result{}, errors.New(fmt.Sprintf("Infrastructure Cluster Type %s is not supported", cluster.Spec.InfrastructureRef.Kind))
+		r.Recorder.Eventf(ociMachinePool, corev1.EventTypeWarning, "InfrastructureClusterTypeNotSupported", fmt.Sprintf("Infrastructure Cluster Type %s is not supported", clusterV2.Spec.InfrastructureRef.Kind))
+		return ctrl.Result{}, errors.New(fmt.Sprintf("Infrastructure Cluster Type %s is not supported", clusterV2.Spec.InfrastructureRef.Kind))
 	}
 
 	_, _, clients, err := cloudutil.InitClientsAndRegion(ctx, r.Client, r.Region, clusterAccessor, r.ClientProvider)
@@ -213,7 +220,7 @@ func (r *OCIMachinePoolReconciler) SetupWithManager(ctx context.Context, mgr ctr
 			&clusterv1.Cluster{},
 			handler.EnqueueRequestsFromMapFunc(clusterToObjectFunc),
 			builder.WithPredicates(
-				predicates.ClusterUnpausedAndInfrastructureReady(mgr.GetScheme(), ctrl.LoggerFrom(ctx)),
+				predicates.ClusterPausedTransitionsOrInfrastructureProvisioned(mgr.GetScheme(), ctrl.LoggerFrom(ctx)),
 			),
 		).
 		WithEventFilter(predicates.ResourceNotPaused(mgr.GetScheme(), ctrl.LoggerFrom(ctx))).

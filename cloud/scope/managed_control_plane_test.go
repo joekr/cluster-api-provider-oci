@@ -36,11 +36,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/cluster-api/util/secret"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 )
+
 
 func TestControlPlaneReconciliation(t *testing.T) {
 	var (
@@ -818,7 +820,7 @@ func TestControlPlaneKubeconfigReconcile(t *testing.T) {
 			name:          "kubeconfig reconcile without secret",
 			errorExpected: false,
 			testSpecificSetup: func(cs *ManagedControlPlaneScope, okeClient *mock_containerengine.MockClient) {
-				client := fake.NewClientBuilder().WithObjects().Build()
+				client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects().Build()
 				cs.client = client
 				clientConfig := api.Config{
 					Clusters: map[string]*api.Cluster{
@@ -884,7 +886,7 @@ func TestControlPlaneKubeconfigReconcile(t *testing.T) {
 						secret.KubeconfigDataName: config,
 					},
 				}
-				client := fake.NewClientBuilder().WithObjects(secret).Build()
+				client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(secret).Build()
 				cs.client = client
 
 				baseClient.EXPECT().GenerateToken(gomock.Any(), gomock.Eq("id")).

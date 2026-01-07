@@ -41,9 +41,11 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 )
+
 
 func TestInstanceReconciliation(t *testing.T) {
 	var (
@@ -67,7 +69,7 @@ func TestInstanceReconciliation(t *testing.T) {
 
 		mockCtrl = gomock.NewController(t)
 		computeClient = mock_compute.NewMockComputeClient(mockCtrl)
-		client := fake.NewClientBuilder().WithObjects(secret).Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(secret).Build()
 		ociCluster = infrastructurev1beta2.OCICluster{
 			ObjectMeta: metav1.ObjectMeta{
 				UID: "uid",
@@ -1770,7 +1772,7 @@ func TestNLBReconciliationCreation(t *testing.T) {
 		mockCtrl = gomock.NewController(t)
 		nlbClient = mock_nlb.NewMockNetworkLoadBalancerClient(mockCtrl)
 		wrClient = mock_workrequests.NewMockClient(mockCtrl)
-		client := fake.NewClientBuilder().WithObjects().Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects().Build()
 		ociCluster = infrastructurev1beta2.OCICluster{
 			ObjectMeta: metav1.ObjectMeta{
 				UID: "uid",
@@ -2093,7 +2095,7 @@ func TestNLBReconciliationDeletion(t *testing.T) {
 		mockCtrl = gomock.NewController(t)
 		nlbClient = mock_nlb.NewMockNetworkLoadBalancerClient(mockCtrl)
 		wrClient = mock_workrequests.NewMockClient(mockCtrl)
-		client := fake.NewClientBuilder().WithObjects().Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects().Build()
 		ociCluster = infrastructurev1beta2.OCICluster{
 			ObjectMeta: metav1.ObjectMeta{
 				UID: "uid",
@@ -2371,7 +2373,7 @@ func TestLBReconciliationCreation(t *testing.T) {
 		mockCtrl = gomock.NewController(t)
 		lbClient = mock_lb.NewMockLoadBalancerClient(mockCtrl)
 		wrClient = mock_workrequests.NewMockClient(mockCtrl)
-		client := fake.NewClientBuilder().WithObjects().Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects().Build()
 		ociCluster = infrastructurev1beta2.OCICluster{
 			ObjectMeta: metav1.ObjectMeta{
 				UID: "uid",
@@ -2683,7 +2685,7 @@ func TestLBReconciliationDeletion(t *testing.T) {
 		mockCtrl = gomock.NewController(t)
 		lbClient = mock_lb.NewMockLoadBalancerClient(mockCtrl)
 		wrClient = mock_workrequests.NewMockClient(mockCtrl)
-		client := fake.NewClientBuilder().WithObjects().Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects().Build()
 		ociCluster = infrastructurev1beta2.OCICluster{
 			ObjectMeta: metav1.ObjectMeta{
 				UID: "uid",
@@ -3003,7 +3005,7 @@ func TestInstanceDeletion(t *testing.T) {
 		var err error
 		mockCtrl = gomock.NewController(t)
 		computeClient = mock_compute.NewMockComputeClient(mockCtrl)
-		client := fake.NewClientBuilder().Build()
+		client := fake.NewClientBuilder().WithScheme(setupScheme()).Build()
 		ociCluster = infrastructurev1beta2.OCICluster{}
 		ms, err = NewMachineScope(MachineScopeParams{
 			ComputeClient: computeClient,

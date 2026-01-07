@@ -14,30 +14,23 @@
  limitations under the License.
 */
 
-package util
+package scope
 
 import (
-	"os"
-	"testing"
-
 	infrastructurev1beta2 "github.com/oracle/cluster-api-provider-oci/api/v1beta2"
 	infrav2exp "github.com/oracle/cluster-api-provider-oci/exp/api/v1beta2"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
-	expclusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1beta2 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
-func TestMain(m *testing.M) {
-	code := 0
-	defer func() { os.Exit(code) }()
-	setup()
-	code = m.Run()
-}
-
-func setup() {
-	utilruntime.Must(infrastructurev1beta2.AddToScheme(scheme.Scheme))
-	utilruntime.Must(clusterv1.AddToScheme(scheme.Scheme))
-	utilruntime.Must(infrav2exp.AddToScheme(scheme.Scheme))
-	utilruntime.Must(expclusterv1.AddToScheme(scheme.Scheme))
+func setupScheme() *runtime.Scheme {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = clusterv1.AddToScheme(scheme)
+	_ = clusterv1beta2.AddToScheme(scheme)
+	_ = infrastructurev1beta2.AddToScheme(scheme)
+	_ = infrav2exp.AddToScheme(scheme)
+	return scheme
 }
