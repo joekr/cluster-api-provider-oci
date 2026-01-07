@@ -40,9 +40,7 @@ import (
 	"sigs.k8s.io/cluster-api/util/secret"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
 )
-
 
 func TestControlPlaneReconciliation(t *testing.T) {
 	var (
