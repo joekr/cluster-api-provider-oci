@@ -1029,6 +1029,18 @@ type HealthChecker struct {
 	// Example: `/healthcheck`
 	// Default value is `/healthz`
 	UrlPath *string `json:"urlPath,omitempty"`
+
+	// The protocol the health check must use; either HTTP or HTTPS, or UDP or TCP.
+	// Example: `HTTP`
+	// Default value is `HTTPS`
+	Protocol *string `json:"protocol,moitempty"`
+
+	// The backend server port against which to run the health check. If the port is not specified,
+	// then the network load balancer uses the port information from the Backend object. The port
+	// must be specified if the backend port is 0.
+	// Example: `8080`
+	// Default: ClusterSpec.ClusterNetwork.APIServerPort
+	Port *int `json:"port,moitempty"`
 }
 
 // NetworkSpec specifies what the OCI networking resources should look like.

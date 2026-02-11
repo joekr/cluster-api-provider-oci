@@ -141,12 +141,29 @@ spec:
                                   be forwarded to an alternative healthy backend as
                                   soon as current backend becomes unhealthy.
                                 properties:
+                                  port:
+                                    description: |-
+                                      The backend server port against which to run the health check. If the port is not specified,
+                                      then the network load balancer uses the port information from the Backend object. The port
+                                      must be specified if the backend port is 0.
+                                      Example: `8080`
+                                      Default: ClusterSpec.ClusterNetwork.APIServerPort
+                                    type: integer
+                                  protocol:
+                                    description: |-
+                                      The protocol the health check must use; either HTTP or HTTPS, or UDP or TCP.
+                                      Example: `HTTP`
+                                      Default value is `HTTPS`
+                                    type: string
                                   urlPath:
                                     description: |-
                                       The path against which to run the health check.
                                       Example: `/healthcheck`
                                       Default value is `/healthz`
                                     type: string
+                                required:
+                                - port
+                                - protocol
                                 type: object
                               isFailOpen:
                                 description: |-
@@ -1302,12 +1319,29 @@ spec:
                                   be forwarded to an alternative healthy backend as
                                   soon as current backend becomes unhealthy.
                                 properties:
+                                  port:
+                                    description: |-
+                                      The backend server port against which to run the health check. If the port is not specified,
+                                      then the network load balancer uses the port information from the Backend object. The port
+                                      must be specified if the backend port is 0.
+                                      Example: `8080`
+                                      Default: ClusterSpec.ClusterNetwork.APIServerPort
+                                    type: integer
+                                  protocol:
+                                    description: |-
+                                      The protocol the health check must use; either HTTP or HTTPS, or UDP or TCP.
+                                      Example: `HTTP`
+                                      Default value is `HTTPS`
+                                    type: string
                                   urlPath:
                                     description: |-
                                       The path against which to run the health check.
                                       Example: `/healthcheck`
                                       Default value is `/healthz`
                                     type: string
+                                required:
+                                - port
+                                - protocol
                                 type: object
                               isFailOpen:
                                 description: |-

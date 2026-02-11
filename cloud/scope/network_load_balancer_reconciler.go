@@ -157,18 +157,35 @@ func (s *ClusterScope) CreateNLB(ctx context.Context, lb infrastructurev1beta2.L
 	}
 
 	backendSetDetails := make(map[string]networkloadbalancer.BackendSetDetails)
+	healthCheckProtocol, ok := networkloadbalancer.GetMappingHealthCheckProtocolsEnum(ptr.ToString(lb.NLBSpec.BackendSetDetails.HealthChecker.Protocol))
+	if !ok {
+		healthCheckProtocol = networkloadbalancer.HealthCheckProtocolsHttps
+	}
+
 	healthCheckUrl := lb.NLBSpec.BackendSetDetails.HealthChecker.UrlPath
 	if healthCheckUrl == nil {
 		healthCheckUrl = common.String("/healthz")
 	}
+
+	// unset healthcheck for non HTTP checks
+	if healthCheckProtocol != networkloadbalancer.HealthCheckProtocolsHttp && healthCheckProtocol != networkloadbalancer.HealthCheckProtocolsHttps {
+		healthCheckUrl = nil
+	}
+
+	port := common.Int(int(s.APIServerPort()))
+	if lb.NLBSpec.BackendSetDetails.HealthChecker.Port != nil {
+		port = lb.NLBSpec.BackendSetDetails.HealthChecker.Port
+	}
+
 	backendSetDetails[APIServerLBBackendSetName] = networkloadbalancer.BackendSetDetails{
 		Policy:                   LoadBalancerPolicy,
 		IsPreserveSource:         isPreserverSourceIp,
 		IsFailOpen:               lb.NLBSpec.BackendSetDetails.IsFailOpen,
 		IsInstantFailoverEnabled: lb.NLBSpec.BackendSetDetails.IsInstantFailoverEnabled,
 		HealthChecker: &networkloadbalancer.HealthChecker{
-			Port:       common.Int(int(s.APIServerPort())),
-			Protocol:   networkloadbalancer.HealthCheckProtocolsHttps,
+			Port: port,
+			// TODO: validation is done at webhook level
+			Protocol:   healthCheckProtocol,
 			UrlPath:    healthCheckUrl,
 			ReturnCode: common.Int(200),
 		},

@@ -1315,6 +1315,8 @@ func Convert_v1beta2_EndpointConfig_To_v1beta1_EndpointConfig(in *v1beta2.Endpoi
 
 func autoConvert_v1beta1_HealthChecker_To_v1beta2_HealthChecker(in *HealthChecker, out *v1beta2.HealthChecker, s conversion.Scope) error {
 	out.UrlPath = (*string)(unsafe.Pointer(in.UrlPath))
+	out.Protocol = (*string)(unsafe.Pointer(in.Protocol))
+	out.Port = (*int)(unsafe.Pointer(in.Port))
 	return nil
 }
 
@@ -1325,6 +1327,8 @@ func Convert_v1beta1_HealthChecker_To_v1beta2_HealthChecker(in *HealthChecker, o
 
 func autoConvert_v1beta2_HealthChecker_To_v1beta1_HealthChecker(in *v1beta2.HealthChecker, out *HealthChecker, s conversion.Scope) error {
 	out.UrlPath = (*string)(unsafe.Pointer(in.UrlPath))
+	out.Protocol = (*string)(unsafe.Pointer(in.Protocol))
+	out.Port = (*int)(unsafe.Pointer(in.Port))
 	return nil
 }
 
