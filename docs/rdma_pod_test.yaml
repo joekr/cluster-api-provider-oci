@@ -1,0 +1,165 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rdma-test
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rdma-server
+  namespace: rdma-test
+spec:
+  clusterIP: None
+  selector:
+    app: rdma-perftest
+    role: server
+  ports:
+  - name: rdma
+    port: 18515
+    targetPort: 18515
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rdma-server
+  namespace: rdma-test
+spec:
+  serviceName: rdma-server
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rdma-perftest
+      role: server
+  template:
+    metadata:
+      labels:
+        app: rdma-perftest
+        role: server
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: rdma.networking/role
+                operator: In
+                values:
+                - server
+      volumes:
+      - name: rdma-devices
+        hostPath:
+          path: /dev/infiniband
+          type: Directory
+      - name: rdma-sys
+        hostPath:
+          path: /sys/class/infiniband
+          type: Directory
+      containers:
+      - name: rdma-server
+        image: iad.ocir.io/iddevjmhjw0n/joekr/rdma-test:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: GID_INDEX
+          value: "3"
+        command:
+        - bash
+        - -c
+        - |
+          set -euo pipefail
+          echo "===== ibv_devices ====="
+          ibv_devices
+          echo "===== /dev/infiniband ====="
+          ls -l /dev/infiniband || true
+          echo "===== ib_write_bw server ====="
+          ib_write_bw \
+            --ib-dev mlx5_0 \
+            --ib-port 1 \
+            --report_gbits \
+            --run_infinitely \
+            --duration 5 \
+            --gid-index ${GID_INDEX} --qp-timeout 14 --sl 0 --mtu 1024 --rdma_cm
+        volumeMounts:
+        - name: rdma-devices
+          mountPath: /dev/infiniband
+        - name: rdma-sys
+          mountPath: /sys/class/infiniband
+          readOnly: true
+        resources:
+          limits:
+            rdma/hca_shared_devices_a: 1
+          requests:
+            rdma/hca_shared_devices_a: 1
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rdma-client
+  namespace: rdma-test
+spec:
+  template:
+    metadata:
+      labels:
+        app: rdma-perftest
+        role: client
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: rdma.networking/role
+                operator: In
+                values:
+                - client
+      volumes:
+      - name: rdma-devices
+        hostPath:
+          path: /dev/infiniband
+          type: Directory
+      - name: rdma-sys
+        hostPath:
+          path: /sys/class/infiniband
+          type: Directory
+      containers:
+      - name: rdma-client
+        image: iad.ocir.io/iddevjmhjw0n/joekr/rdma-test:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: GID_INDEX
+          value: "3"
+        - name: SERVER_HOST_IP
+          value: "10.0.67.206"
+        command:
+        - bash
+        - -c
+        - |
+          set -euo pipefail
+          echo "===== ibv_devices ====="
+          ibv_devices
+          echo "===== /dev/infiniband ====="
+          ls -l /dev/infiniband || true
+          echo "===== ib_write_bw client ====="
+          ib_write_bw \
+            ${SERVER_HOST_IP} \
+            --ib-dev mlx5_0 \
+            --ib-port 1 \
+            --report_gbits \
+            --gid-index ${GID_INDEX} --qp-timeout 14 --sl 0 --mtu 1024 --rdma_cm \
+            --iters 5000
+        volumeMounts:
+        - name: rdma-devices
+          mountPath: /dev/infiniband
+        - name: rdma-sys
+          mountPath: /sys/class/infiniband
+          readOnly: true
+        resources:
+          limits:
+            rdma/hca_shared_devices_a: 1
+          requests:
+            rdma/hca_shared_devices_a: 1
+  backoffLimit: 0

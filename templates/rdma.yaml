@@ -1,0 +1,149 @@
+---
+# Namespace for RDMA components
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rdma-system
+---
+# ServiceAccount for the RDMA shared device plugin
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rdma-device-plugin
+  namespace: rdma-system
+---
+# Minimal RBAC (device plugins usually only need to talk to kubelet via unix socket)
+# Including lease permissions for leader election (some envs enable it by default)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rdma-device-plugin
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rdma-device-plugin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rdma-device-plugin
+subjects:
+  - kind: ServiceAccount
+    name: rdma-device-plugin
+    namespace: rdma-system
+---
+# RDMA Shared Device Plugin configuration
+# This config selects Mellanox (vendor 15b3) HCAs and exposes them via
+# the default resource name `hca_shared_devices_a`.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rdma-shared-dp-config
+  namespace: rdma-system
+data:
+  config.json: |
+    {
+      "periodicUpdateInterval": 300,
+      "configList": [
+        {
+          "resourceName": "hca_shared_devices_a",
+          "rdmaHcaMax": 1000,
+          "selectors": {
+            "vendors": ["15b3"]
+          }
+        }
+      ]
+    }
+---
+# RDMA Shared Device Plugin DaemonSet
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: rdma-shared-dp
+  namespace: rdma-system
+spec:
+  selector:
+    matchLabels:
+      app: rdma-shared-dp
+  template:
+    metadata:
+      labels:
+        app: rdma-shared-dp
+    spec:
+      serviceAccountName: rdma-device-plugin
+      hostNetwork: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: rdma-shared-dev-plugin
+          # Upstream RDMA Shared Device Plugin image
+          image: ghcr.io/mellanox/k8s-rdma-shared-dev-plugin:v1.5.3
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          command:
+            - /usr/bin/k8s-rdma-shared-dev-plugin
+          args:
+            - "--config-dir=/k8s-rdma-shared-dev-plugin/config"
+          env:
+            - name: KUBELET_ROOT_DIR
+              value: /var/lib/kubelet
+          volumeMounts:
+            - name: dev-infiniband
+              mountPath: /dev/infiniband
+              readOnly: false
+            - name: host-sys
+              mountPath: /sys
+              readOnly: true
+            - name: host-modules
+              mountPath: /lib/modules
+              readOnly: true
+            - name: kubelet-sockets
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: plugin-config
+              mountPath: /k8s-rdma-shared-dev-plugin/config
+      volumes:
+        - name: dev-infiniband
+          hostPath:
+            path: /dev/infiniband
+            type: Directory
+        - name: host-sys
+          hostPath:
+            path: /sys
+            type: Directory
+        - name: host-modules
+          hostPath:
+            path: /lib/modules
+            type: Directory
+        - name: kubelet-sockets
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+            type: Directory
+        - name: plugin-config
+          configMap:
+            name: rdma-shared-dp-config
+            items:
+              - key: config.json
+                path: config.json
+
+# Usage notes:
+# 1) Label the RDMA-capable worker nodes (optional but recommended):
+#    kubectl label nodes <node-name> rdma.networking/ready=true
+#    and then set a nodeSelector on the DaemonSet if you only want to run on those nodes.
+# 2) After this DaemonSet is running, the kubelet on each node will advertise a resource
+#    named "rdma/shared". A Pod can request it via:
+#
+#    resources:
+#      limits:
+#        rdma/shared: 1
+#
+# 3) If your workload also needs a separate data network, add Multus + SR-IOV CNI and attach a
+#    secondary interface. This RDMA plugin works independently of that and exposes the verbs devices
+#    (e.g., /dev/infiniband/uverbsX) to the Pod.
