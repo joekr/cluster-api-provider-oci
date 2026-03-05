@@ -21,3 +21,8 @@
 {"issue_id":"cluster-api-provider-oci-joekr-22y.8","label":"area/test"}
 {"issue_id":"cluster-api-provider-oci-joekr-22y.8","label":"feature/lb"}
 {"issue_id":"cluster-api-provider-oci-joekr-22y.8","label":"kind/epic"}
+{"issue_id":"cluster-api-provider-oci-joekr-22y.9","label":"area/network"}
+{"issue_id":"cluster-api-provider-oci-joekr-22y.9","label":"area/scope"}
+{"issue_id":"cluster-api-provider-oci-joekr-22y.9","label":"area/test"}
+{"issue_id":"cluster-api-provider-oci-joekr-22y.9","label":"feature/lb"}
+{"issue_id":"cluster-api-provider-oci-joekr-22y.9","label":"kind/epic"}
