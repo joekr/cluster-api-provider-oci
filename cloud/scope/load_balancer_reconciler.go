@@ -68,7 +68,10 @@ func (s *ClusterScope) ReconcileApiServerLB(ctx context.Context) error {
 		Host: *lbIP,
 		Port: s.APIServerPort(),
 	})
-	return err
+	if err := s.reconcileLBResources(ctx, desiredApiServerLb); err != nil {
+		return err
+	}
+	return nil
 }
 
 // DeleteApiServerLB retrieves and attempts to delete the Load Balancer if found.
@@ -393,11 +396,44 @@ func (s *ClusterScope) getLoadbalancerIp(lb loadbalancer.LoadBalancer) (*string,
 }
 
 // IsLBEqual determines if the actual loadbalancer.LoadBalancer is equal to the desired.
-// Equality is determined by DisplayName, FreeformTags and DefinedTags matching.
+// Equality is determined by the LB identity plus desired listener/backend-set resources matching.
 func (s *ClusterScope) IsLBEqual(actual *loadbalancer.LoadBalancer, desired infrastructurev1beta2.LoadBalancer) bool {
 	if desired.Name != *actual.DisplayName {
 		return false
 	}
+
+	desiredListeners, desiredBackendSets := s.buildDesiredLBListenersAndBackendSets(desired)
+	if len(actual.Listeners) != len(desiredListeners) {
+		return false
+	}
+	for name, desiredListener := range desiredListeners {
+		actualListener, exists := actual.Listeners[name]
+		if !exists {
+			return false
+		}
+		if !intPtrEqual(actualListener.Port, desiredListener.Port) ||
+			!ptr.StringEquals(actualListener.DefaultBackendSetName, ptr.ToString(desiredListener.DefaultBackendSetName)) ||
+			!ptr.StringEquals(actualListener.Protocol, ptr.ToString(desiredListener.Protocol)) {
+			return false
+		}
+	}
+
+	if len(actual.BackendSets) != len(desiredBackendSets) {
+		return false
+	}
+	for name, desiredBackendSet := range desiredBackendSets {
+		actualBackendSet, exists := actual.BackendSets[name]
+		if !exists {
+			return false
+		}
+		if !ptr.StringEquals(actualBackendSet.Policy, ptr.ToString(desiredBackendSet.Policy)) ||
+			actualBackendSet.HealthChecker == nil || desiredBackendSet.HealthChecker == nil ||
+			!intPtrEqual(actualBackendSet.HealthChecker.Port, desiredBackendSet.HealthChecker.Port) ||
+			!ptr.StringEquals(actualBackendSet.HealthChecker.Protocol, ptr.ToString(desiredBackendSet.HealthChecker.Protocol)) {
+			return false
+		}
+	}
+
 	return true
 }
 

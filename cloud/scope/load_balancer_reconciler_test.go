@@ -103,6 +103,24 @@ func TestLBReconciliation(t *testing.T) {
 							DefinedTags:    make(map[string]map[string]interface{}),
 							IsPrivate:      common.Bool(false),
 							DisplayName:    common.String(fmt.Sprintf("%s-%s", "cluster", "apiserver")),
+							Listeners: map[string]loadbalancer.Listener{
+								APIServerLBListener: {
+									Name:                  common.String(APIServerLBListener),
+									Protocol:              common.String("TCP"),
+									Port:                  common.Int(6443),
+									DefaultBackendSetName: common.String(APIServerLBBackendSetName),
+								},
+							},
+							BackendSets: map[string]loadbalancer.BackendSet{
+								APIServerLBBackendSetName: {
+									Name:   common.String(APIServerLBBackendSetName),
+									Policy: common.String("ROUND_ROBIN"),
+									HealthChecker: &loadbalancer.HealthChecker{
+										Port:     common.Int(6443),
+										Protocol: common.String("TCP"),
+									},
+								},
+							},
 							IpAddresses: []loadbalancer.IpAddress{
 								{
 									IpAddress: common.String("2.2.2.2"),
@@ -316,6 +334,36 @@ func TestLBReconciliation(t *testing.T) {
 							},
 						},
 					}, nil)
+				lbClient.EXPECT().GetLoadBalancer(gomock.Any(), gomock.Eq(loadbalancer.GetLoadBalancerRequest{
+					LoadBalancerId: common.String("lb-id"),
+				})).
+					Return(loadbalancer.GetLoadBalancerResponse{
+						LoadBalancer: loadbalancer.LoadBalancer{
+							Id:           common.String("lb-id"),
+							FreeformTags: tags,
+							IsPrivate:    common.Bool(false),
+							DisplayName:  common.String(fmt.Sprintf("%s-%s", "cluster", "apiserver")),
+							Listeners: map[string]loadbalancer.Listener{
+								APIServerLBListener: {
+									Name:                  common.String(APIServerLBListener),
+									Protocol:              common.String("TCP"),
+									Port:                  common.Int(6443),
+									DefaultBackendSetName: common.String(APIServerLBBackendSetName),
+								},
+							},
+							BackendSets: map[string]loadbalancer.BackendSet{
+								APIServerLBBackendSetName: {
+									Name:   common.String(APIServerLBBackendSetName),
+									Policy: common.String("ROUND_ROBIN"),
+									HealthChecker: &loadbalancer.HealthChecker{
+										Port:     common.Int(6443),
+										Protocol: common.String("TCP"),
+									},
+								},
+							},
+							IpAddresses: []loadbalancer.IpAddress{{IpAddress: common.String("2.2.2.2"), IsPublic: common.Bool(true)}},
+						},
+					}, nil)
 
 			},
 		},
@@ -409,6 +457,24 @@ func TestLBReconciliation(t *testing.T) {
 									IsPublic:  common.Bool(true),
 								},
 							},
+						},
+					}, nil)
+				lbClient.EXPECT().GetLoadBalancer(gomock.Any(), gomock.Eq(loadbalancer.GetLoadBalancerRequest{
+					LoadBalancerId: common.String("lb-id"),
+				})).
+					Return(loadbalancer.GetLoadBalancerResponse{
+						LoadBalancer: loadbalancer.LoadBalancer{
+							Id:           common.String("lb-id"),
+							FreeformTags: tags,
+							IsPrivate:    common.Bool(false),
+							DisplayName:  common.String(fmt.Sprintf("%s-%s", "cluster", "apiserver")),
+							Listeners: map[string]loadbalancer.Listener{
+								APIServerLBListener: {Name: common.String(APIServerLBListener), Protocol: common.String("TCP"), Port: common.Int(6443), DefaultBackendSetName: common.String(APIServerLBBackendSetName)},
+							},
+							BackendSets: map[string]loadbalancer.BackendSet{
+								APIServerLBBackendSetName: {Name: common.String(APIServerLBBackendSetName), Policy: common.String("ROUND_ROBIN"), HealthChecker: &loadbalancer.HealthChecker{Port: common.Int(6443), Protocol: common.String("TCP")}},
+							},
+							IpAddresses: []loadbalancer.IpAddress{{IpAddress: common.String("2.2.2.2"), IsPublic: common.Bool(true)}},
 						},
 					}, nil)
 
