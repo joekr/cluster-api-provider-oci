@@ -185,6 +185,69 @@ spec:
                                           The value is false by default.
                                         type: boolean
                                     type: object
+                                  backendSets:
+                                    description: |-
+                                      BackendSets specifies the canonical API server backend-set topology for NLB reconciliation.
+                                      When empty, CAPOCI falls back to the legacy single backendSetDetails configuration.
+                                    items:
+                                      description: BackendSet specifies a single canonical
+                                        API server backend set for a network load
+                                        balancer.
+                                      properties:
+                                        backendSetDetails:
+                                          description: BackendSetDetails specifies
+                                            the configuration of a network load balancer
+                                            backend set.
+                                          properties:
+                                            healthChecker:
+                                              description: If enabled existing connections
+                                                will be forwarded to an alternative
+                                                healthy backend as soon as current
+                                                backend becomes unhealthy.
+                                              properties:
+                                                urlPath:
+                                                  description: |-
+                                                    The path against which to run the health check.
+                                                    Example: `/healthcheck`
+                                                    Default value is `/healthz`
+                                                  type: string
+                                              type: object
+                                            isFailOpen:
+                                              description: |-
+                                                If enabled, the network load balancer will continue to distribute traffic in the configured distribution in the event all backends are unhealthy.
+                                                The value is false by default.
+                                              type: boolean
+                                            isInstantFailoverEnabled:
+                                              description: If enabled existing connections
+                                                will be forwarded to an alternative
+                                                healthy backend as soon as current
+                                                backend becomes unhealthy.
+                                              type: boolean
+                                            isPreserveSource:
+                                              description: |-
+                                                If this parameter is enabled, then the network load balancer preserves the source IP of the packet when it is forwarded to backends.
+                                                Backends see the original source IP. If the isPreserveSourceDestination parameter is enabled for the network load balancer resource, then this parameter cannot be disabled.
+                                                The value is false by default.
+                                              type: boolean
+                                          type: object
+                                        listenerPort:
+                                          description: |-
+                                            ListenerPort overrides the API server listener, backend registration, and health-check port for this backend set.
+                                            When omitted, the owning Cluster API server port is used.
+                                          format: int32
+                                          type: integer
+                                        name:
+                                          description: Name is the stable backend
+                                            set identifier used for OCI listener/backend-set
+                                            resources.
+                                          type: string
+                                      required:
+                                      - name
+                                      type: object
+                                    type: array
+                                    x-kubernetes-list-map-keys:
+                                    - name
+                                    x-kubernetes-list-type: map
                                   reservedIpIds:
                                     description: |-
                                       A list of a reserved Ip OCID
@@ -1296,6 +1359,69 @@ spec:
                                           The value is false by default.
                                         type: boolean
                                     type: object
+                                  backendSets:
+                                    description: |-
+                                      BackendSets specifies the canonical API server backend-set topology for NLB reconciliation.
+                                      When empty, CAPOCI falls back to the legacy single backendSetDetails configuration.
+                                    items:
+                                      description: BackendSet specifies a single canonical
+                                        API server backend set for a network load
+                                        balancer.
+                                      properties:
+                                        backendSetDetails:
+                                          description: BackendSetDetails specifies
+                                            the configuration of a network load balancer
+                                            backend set.
+                                          properties:
+                                            healthChecker:
+                                              description: If enabled existing connections
+                                                will be forwarded to an alternative
+                                                healthy backend as soon as current
+                                                backend becomes unhealthy.
+                                              properties:
+                                                urlPath:
+                                                  description: |-
+                                                    The path against which to run the health check.
+                                                    Example: `/healthcheck`
+                                                    Default value is `/healthz`
+                                                  type: string
+                                              type: object
+                                            isFailOpen:
+                                              description: |-
+                                                If enabled, the network load balancer will continue to distribute traffic in the configured distribution in the event all backends are unhealthy.
+                                                The value is false by default.
+                                              type: boolean
+                                            isInstantFailoverEnabled:
+                                              description: If enabled existing connections
+                                                will be forwarded to an alternative
+                                                healthy backend as soon as current
+                                                backend becomes unhealthy.
+                                              type: boolean
+                                            isPreserveSource:
+                                              description: |-
+                                                If this parameter is enabled, then the network load balancer preserves the source IP of the packet when it is forwarded to backends.
+                                                Backends see the original source IP. If the isPreserveSourceDestination parameter is enabled for the network load balancer resource, then this parameter cannot be disabled.
+                                                The value is false by default.
+                                              type: boolean
+                                          type: object
+                                        listenerPort:
+                                          description: |-
+                                            ListenerPort overrides the API server listener, backend registration, and health-check port for this backend set.
+                                            When omitted, the owning Cluster API server port is used.
+                                          format: int32
+                                          type: integer
+                                        name:
+                                          description: Name is the stable backend
+                                            set identifier used for OCI listener/backend-set
+                                            resources.
+                                          type: string
+                                      required:
+                                      - name
+                                      type: object
+                                    type: array
+                                    x-kubernetes-list-map-keys:
+                                    - name
+                                    x-kubernetes-list-type: map
                                   reservedIpIds:
                                     description: |-
                                       A list of a reserved Ip OCID

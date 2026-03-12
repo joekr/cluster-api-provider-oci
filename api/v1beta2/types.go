@@ -1002,11 +1002,33 @@ type NLBSpec struct {
 	// +optional
 	BackendSetDetails BackendSetDetails `json:"backendSetDetails,omitempty"`
 
+	// BackendSets specifies the canonical API server backend-set topology for NLB reconciliation.
+	// When empty, CAPOCI falls back to the legacy single backendSetDetails configuration.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	BackendSets []BackendSet `json:"backendSets,omitempty"`
+
 	// A list of a reserved Ip OCID
 	// Min Items: 0
 	// Max Items: 1
 	// +optional
 	ReservedIpIds []string `json:"reservedIpIds,omitempty"`
+}
+
+// BackendSet specifies a single canonical API server backend set for a network load balancer.
+type BackendSet struct {
+	// Name is the stable backend set identifier used for OCI listener/backend-set resources.
+	Name string `json:"name"`
+
+	// ListenerPort overrides the API server listener, backend registration, and health-check port for this backend set.
+	// When omitted, the owning Cluster API server port is used.
+	// +optional
+	ListenerPort *int32 `json:"listenerPort,omitempty"`
+
+	// BackendSetDetails specifies the configuration of a network load balancer backend set.
+	// +optional
+	BackendSetDetails BackendSetDetails `json:"backendSetDetails,omitempty"`
 }
 
 // BackendSetDetails specifies the configuration of a network load balancer backend set.

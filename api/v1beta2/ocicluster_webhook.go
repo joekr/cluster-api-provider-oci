@@ -22,20 +22,31 @@ package v1beta2
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	kubevalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/util"
 	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
+const defaultAPIServerPort int32 = 6443
+
 var clusterlogger = ctrl.Log.WithName("ocicluster-resource")
 
-type OCIClusterWebhook struct{}
+// +kubebuilder:object:generate=false
+type OCIClusterWebhook struct {
+	Client ctrlclient.Client
+}
 
 var (
 	_ webhook.CustomDefaulter = &OCIClusterWebhook{}
@@ -63,7 +74,7 @@ func (*OCIClusterWebhook) Default(_ context.Context, obj runtime.Object) error {
 }
 
 func (c *OCICluster) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	w := new(OCIClusterWebhook)
+	w := &OCIClusterWebhook{Client: mgr.GetClient()}
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(c).
 		WithDefaulter(w).
@@ -72,7 +83,7 @@ func (c *OCICluster) SetupWebhookWithManager(mgr ctrl.Manager) error {
 }
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
-func (*OCIClusterWebhook) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
+func (w *OCIClusterWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	c, ok := obj.(*OCICluster)
 	if !ok {
 		return nil, fmt.Errorf("expected an OCICluster object but got %T", c)
@@ -163,7 +174,7 @@ func (*OCIClusterWebhook) ValidateCreate(_ context.Context, obj runtime.Object) 
 		}
 	}
 
-	allErrs = append(allErrs, c.validate(nil)...)
+	allErrs = append(allErrs, c.validate(nil, w.apiServerPort(ctx, c))...)
 
 	if len(allErrs) == 0 {
 		return nil, nil
@@ -184,7 +195,7 @@ func (*OCIClusterWebhook) ValidateDelete(_ context.Context, obj runtime.Object) 
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
-func (*OCIClusterWebhook) ValidateUpdate(_ context.Context, oldRaw, newObj runtime.Object) (admission.Warnings, error) {
+func (w *OCIClusterWebhook) ValidateUpdate(ctx context.Context, oldRaw, newObj runtime.Object) (admission.Warnings, error) {
 	c, ok := newObj.(*OCICluster)
 	if !ok {
 		return nil, fmt.Errorf("expected an OCICluster object but got %T", c)
@@ -262,7 +273,7 @@ func (*OCIClusterWebhook) ValidateUpdate(_ context.Context, oldRaw, newObj runti
 		}
 	}
 
-	allErrs = append(allErrs, c.validate(oldCluster)...)
+	allErrs = append(allErrs, c.validate(oldCluster, w.apiServerPort(ctx, c))...)
 
 	if len(allErrs) == 0 {
 		return nil, nil
@@ -271,7 +282,33 @@ func (*OCIClusterWebhook) ValidateUpdate(_ context.Context, oldRaw, newObj runti
 	return nil, apierrors.NewInvalid(c.GroupVersionKind().GroupKind(), c.Name, allErrs)
 }
 
-func (c *OCICluster) validate(old *OCICluster) field.ErrorList {
+func (w *OCIClusterWebhook) apiServerPort(ctx context.Context, cluster *OCICluster) int32 {
+	if w == nil || w.Client == nil {
+		return defaultAPIServerPort
+	}
+
+	ownerCluster, err := util.GetOwnerCluster(ctx, w.Client, cluster.ObjectMeta)
+	if err == nil && ownerCluster != nil && ownerCluster.Spec.ClusterNetwork.APIServerPort != 0 {
+		return ownerCluster.Spec.ClusterNetwork.APIServerPort
+	}
+
+	clusterName := cluster.Labels[clusterv1.ClusterNameLabel]
+	if clusterName == "" {
+		return defaultAPIServerPort
+	}
+
+	resolvedCluster := &clusterv1.Cluster{}
+	if err := w.Client.Get(ctx, types.NamespacedName{Namespace: cluster.Namespace, Name: clusterName}, resolvedCluster); err != nil {
+		return defaultAPIServerPort
+	}
+	if resolvedCluster.Spec.ClusterNetwork.APIServerPort != 0 {
+		return resolvedCluster.Spec.ClusterNetwork.APIServerPort
+	}
+
+	return defaultAPIServerPort
+}
+
+func (c *OCICluster) validate(old *OCICluster, apiServerPort int32) field.ErrorList {
 	var allErrs field.ErrorList
 
 	var oldNetworkSpec NetworkSpec
@@ -281,6 +318,7 @@ func (c *OCICluster) validate(old *OCICluster) field.ErrorList {
 
 	allErrs = append(allErrs, ValidateNetworkSpec(OCIClusterSubnetRoles, c.Spec.NetworkSpec, oldNetworkSpec, field.NewPath("spec").Child("networkSpec"))...)
 	allErrs = append(allErrs, ValidateClusterName(c.Name)...)
+	allErrs = append(allErrs, c.validateAPIServerNLBTopology(old, apiServerPort)...)
 
 	if len(c.Spec.CompartmentId) <= 0 {
 		allErrs = append(
@@ -310,6 +348,116 @@ func (c *OCICluster) validate(old *OCICluster) field.ErrorList {
 
 	if len(allErrs) == 0 {
 		return nil
+	}
+
+	return allErrs
+}
+
+func (c *OCICluster) validateAPIServerNLBTopology(old *OCICluster, apiServerPort int32) field.ErrorList {
+	var allErrs field.ErrorList
+
+	nlbPath := field.NewPath("spec", "networkSpec", "apiServerLoadBalancer", "nlbSpec")
+	newNLBSpec := c.Spec.NetworkSpec.APIServerLB.NLBSpec
+	if len(newNLBSpec.BackendSets) == 0 {
+		return nil
+	}
+
+	if HasConfiguredBackendSetDetails(newNLBSpec.BackendSetDetails) {
+		allErrs = append(allErrs, field.Invalid(
+			nlbPath.Child("backendSetDetails"),
+			newNLBSpec.BackendSetDetails,
+			"legacy backendSetDetails cannot be combined with backendSets",
+		))
+	}
+
+	resolved := ResolveAPIServerNLBBackendSets(newNLBSpec, apiServerPort)
+	names := make(map[string]struct{}, len(resolved))
+	ports := make(map[int32]string, len(resolved))
+	primaryCount := 0
+	for i, backendSet := range newNLBSpec.BackendSets {
+		backendPath := nlbPath.Child("backendSets").Index(i)
+		if errs := kubevalidation.IsDNS1123Label(backendSet.Name); len(errs) > 0 {
+			allErrs = append(allErrs, field.Invalid(backendPath.Child("name"), backendSet.Name, strings.Join(errs, ", ")))
+		}
+		if _, ok := names[backendSet.Name]; ok {
+			allErrs = append(allErrs, field.Duplicate(backendPath.Child("name"), backendSet.Name))
+		}
+		names[backendSet.Name] = struct{}{}
+	}
+
+	for _, backendSet := range resolved {
+		if owner, ok := ports[backendSet.ListenerPort]; ok {
+			allErrs = append(allErrs, field.Invalid(
+				nlbPath.Child("backendSets"),
+				newNLBSpec.BackendSets,
+				fmt.Sprintf("listenerPort %d is duplicated by backendSets %q and %q", backendSet.ListenerPort, owner, backendSet.Name),
+			))
+			continue
+		}
+		ports[backendSet.ListenerPort] = backendSet.Name
+		if backendSet.IsPrimary {
+			primaryCount++
+		}
+	}
+
+	if primaryCount == 0 {
+		allErrs = append(allErrs, field.Invalid(
+			nlbPath.Child("backendSets"),
+			newNLBSpec.BackendSets,
+			fmt.Sprintf("one backendSet must resolve to the API server port %d", apiServerPort),
+		))
+	}
+	if primaryCount > 1 {
+		allErrs = append(allErrs, field.Invalid(
+			nlbPath.Child("backendSets"),
+			newNLBSpec.BackendSets,
+			fmt.Sprintf("only one backendSet may resolve to the API server port %d", apiServerPort),
+		))
+	}
+
+	if old == nil {
+		return allErrs
+	}
+
+	oldResolved := ResolveAPIServerNLBBackendSets(old.Spec.NetworkSpec.APIServerLB.NLBSpec, apiServerPort)
+	oldByName := make(map[string]ResolvedAPIServerBackendSet, len(oldResolved))
+	newByName := make(map[string]ResolvedAPIServerBackendSet, len(resolved))
+	var oldPrimary, newPrimary *ResolvedAPIServerBackendSet
+	for i := range oldResolved {
+		backendSet := oldResolved[i]
+		oldByName[backendSet.Name] = backendSet
+		if backendSet.IsPrimary {
+			oldPrimary = &backendSet
+		}
+	}
+	for i := range resolved {
+		backendSet := resolved[i]
+		newByName[backendSet.Name] = backendSet
+		if backendSet.IsPrimary {
+			newPrimary = &backendSet
+		}
+	}
+
+	if oldPrimary != nil && newPrimary != nil && oldPrimary.Name != newPrimary.Name {
+		allErrs = append(allErrs, field.Invalid(
+			nlbPath.Child("backendSets"),
+			newNLBSpec.BackendSets,
+			fmt.Sprintf("primary backendSet ownership is immutable: %q currently owns the API server port", oldPrimary.Name),
+		))
+	}
+
+	for name, oldBackendSet := range oldByName {
+		newBackendSet, ok := newByName[name]
+		if !ok {
+			continue
+		}
+		if oldBackendSet.ListenerPort != newBackendSet.ListenerPort {
+			allErrs = append(allErrs, field.Invalid(
+				nlbPath.Child("backendSets"),
+				newNLBSpec.BackendSets,
+				fmt.Sprintf("listenerPort for backendSet %q is immutable", name),
+			))
+		}
 	}
 
 	return allErrs

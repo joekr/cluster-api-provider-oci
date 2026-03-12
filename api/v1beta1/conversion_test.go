@@ -19,6 +19,7 @@ package v1beta1
 import (
 	"testing"
 
+	"github.com/oracle/oci-go-sdk/v65/common"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/apitesting/fuzzer"
 	"k8s.io/apimachinery/pkg/conversion"
@@ -239,6 +240,40 @@ func TestConvert_v1beta1_VCN_To_v1beta2_VCN(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOCIClusterBackendSetsRoundTripConversion(t *testing.T) {
+	g := NewWithT(t)
+
+	src := &v1beta2.OCICluster{
+		Spec: v1beta2.OCIClusterSpec{
+			NetworkSpec: v1beta2.NetworkSpec{
+				APIServerLB: v1beta2.LoadBalancer{
+					LoadBalancerType: v1beta2.LoadBalancerTypeNLB,
+					NLBSpec: v1beta2.NLBSpec{
+						BackendSetDetails: v1beta2.BackendSetDetails{
+							HealthChecker: v1beta2.HealthChecker{UrlPath: common.String("/readyz")},
+						},
+						BackendSets: []v1beta2.BackendSet{
+							{Name: "primary"},
+							{Name: "secondary", ListenerPort: func() *int32 { v := int32(7443); return &v }()},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	spoke := &OCICluster{}
+	g.Expect(spoke.ConvertFrom(src)).To(Succeed())
+	hub := &v1beta2.OCICluster{}
+	g.Expect(spoke.ConvertTo(hub)).To(Succeed())
+
+	g.Expect(hub.Spec.NetworkSpec.APIServerLB.NLBSpec.BackendSets).To(HaveLen(2))
+	g.Expect(hub.Spec.NetworkSpec.APIServerLB.NLBSpec.BackendSets[1].ListenerPort).ToNot(BeNil())
+	g.Expect(*hub.Spec.NetworkSpec.APIServerLB.NLBSpec.BackendSets[1].ListenerPort).To(Equal(int32(7443)))
+	g.Expect(hub.Spec.NetworkSpec.APIServerLB.NLBSpec.BackendSetDetails.HealthChecker.UrlPath).ToNot(BeNil())
+	g.Expect(*hub.Spec.NetworkSpec.APIServerLB.NLBSpec.BackendSetDetails.HealthChecker.UrlPath).To(Equal("/readyz"))
 }
 
 func TestConvert_v1beta2_VCN_To_v1beta1_VCN(t *testing.T) {

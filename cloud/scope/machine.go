@@ -673,20 +673,28 @@ func (m *MachineScope) ReconcileCreateInstanceOnLB(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		backendSet := lb.BackendSets[APIServerLBBackendSetName]
-		if !m.containsNLBBackend(backendSet, m.Name()) {
+		desiredBackendSets := infrastructurev1beta2.ResolveAPIServerNLBBackendSets(
+			m.OCIClusterAccessor.GetNetworkSpec().APIServerLB.NLBSpec,
+			m.apiServerPort(),
+		)
+		desiredBackendSetNames := make(map[string]struct{}, len(desiredBackendSets))
+		for _, desiredBackendSet := range desiredBackendSets {
+			desiredBackendSetNames[desiredBackendSet.Name] = struct{}{}
+			backendSet, ok := lb.BackendSets[desiredBackendSet.Name]
+			if !ok {
+				return errors.Errorf("network load balancer backend set %q not found", desiredBackendSet.Name)
+			}
+			if m.containsNLBBackend(backendSet, m.Name()) {
+				continue
+			}
 			logger := m.Logger.WithValues("backend-set", *backendSet.Name)
 			logger.Info("Checking work request status for create backend")
-			// we always try to create the backend if it exists during a reconcile loop and wait for the work request
-			// to complete. If there is a work request in progress, in the rare case, CAPOCI pod restarts during the
-			// work request, the create backend call may throw an error which is ok, as reconcile will go into
-			// an exponential backoff
 			resp, err := m.NetworkLoadBalancerClient.CreateBackend(ctx, networkloadbalancer.CreateBackendRequest{
 				NetworkLoadBalancerId: loadbalancerId,
 				BackendSetName:        backendSet.Name,
 				CreateBackendDetails: networkloadbalancer.CreateBackendDetails{
 					IpAddress: common.String(instanceIp),
-					Port:      common.Int(int(m.OCIClusterAccessor.GetControlPlaneEndpoint().Port)),
+					Port:      common.Int(int(desiredBackendSet.ListenerPort)),
 					Name:      common.String(m.Name()),
 				},
 				OpcRetryToken: ociutil.GetOPCRetryToken("%s-%s", "create-backend", string(m.OCIMachine.UID)),
@@ -702,6 +710,17 @@ func (m *MachineScope) ReconcileCreateInstanceOnLB(ctx context.Context) error {
 				return err
 			}
 			logger.Info("NLB Backend addition work request is complete")
+		}
+		for backendSetName, backendSet := range lb.BackendSets {
+			if _, ok := desiredBackendSetNames[backendSetName]; ok {
+				continue
+			}
+			if !m.containsNLBBackend(backendSet, m.Name()) {
+				continue
+			}
+			if err := m.deleteNLBBackend(ctx, loadbalancerId, backendSet.Name, m.Name()); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -782,31 +801,40 @@ func (m *MachineScope) ReconcileDeleteInstanceOnLB(ctx context.Context) error {
 			}
 			return err
 		}
-		backendSet := lb.BackendSets[APIServerLBBackendSetName]
-		if m.containsNLBBackend(backendSet, m.Name()) {
-			logger := m.Logger.WithValues("backend-set", *backendSet.Name)
-			// we always try to delete the backend if it exists during a reconcile loop and wait for the work request
-			// to complete. If there is a work request in progress, in the rare case, CAPOCI pod restarts during the
-			// work request, the delete backend call may throw an error which is ok, as reconcile will go into
-			// an exponential backoff
-			resp, err := m.NetworkLoadBalancerClient.DeleteBackend(ctx, networkloadbalancer.DeleteBackendRequest{
-				NetworkLoadBalancerId: loadbalancerId,
-				BackendSetName:        backendSet.Name,
-				BackendName:           common.String(m.Name()),
-			})
-			if err != nil {
-				return err
+		for _, backendSet := range lb.BackendSets {
+			if !m.containsNLBBackend(backendSet, m.Name()) {
+				continue
 			}
-			m.OCIMachine.Status.DeleteBackendWorkRequestId = *resp.OpcWorkRequestId
-			logger.Info("Delete instance from LB backend-set", "WorkRequestId", resp.OpcWorkRequestId)
-			logger.Info("Waiting for LB work request to be complete")
-			_, err = ociutil.AwaitNLBWorkRequest(ctx, m.NetworkLoadBalancerClient, resp.OpcWorkRequestId)
-			if err != nil {
+			if err := m.deleteNLBBackend(ctx, loadbalancerId, backendSet.Name, m.Name()); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func (m *MachineScope) apiServerPort() int32 {
+	if m.Cluster != nil && m.Cluster.Spec.ClusterNetwork.APIServerPort != 0 {
+		return m.Cluster.Spec.ClusterNetwork.APIServerPort
+	}
+	return ApiServerPort
+}
+
+func (m *MachineScope) deleteNLBBackend(ctx context.Context, loadbalancerId, backendSetName *string, backendName string) error {
+	logger := m.Logger.WithValues("backend-set", *backendSetName)
+	resp, err := m.NetworkLoadBalancerClient.DeleteBackend(ctx, networkloadbalancer.DeleteBackendRequest{
+		NetworkLoadBalancerId: loadbalancerId,
+		BackendSetName:        backendSetName,
+		BackendName:           common.String(backendName),
+	})
+	if err != nil {
+		return err
+	}
+	m.OCIMachine.Status.DeleteBackendWorkRequestId = *resp.OpcWorkRequestId
+	logger.Info("Delete instance from LB backend-set", "WorkRequestId", resp.OpcWorkRequestId)
+	logger.Info("Waiting for LB work request to be complete")
+	_, err = ociutil.AwaitNLBWorkRequest(ctx, m.NetworkLoadBalancerClient, resp.OpcWorkRequestId)
+	return err
 }
 
 func (m *MachineScope) containsNLBBackend(backendSet networkloadbalancer.BackendSet, backendName string) bool {

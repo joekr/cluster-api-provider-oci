@@ -300,6 +300,48 @@ spec:
       loadBalancerType: "lb"
 ```
 
+`backendSets` and `listenerPort` do not change `loadBalancerType: lb` behavior in this phase. Multi-backend-set
+reconciliation is currently implemented only for the default NLB path.
+
+## API server backendSets on NLB
+
+`listenerPort` defines the NLB listener port, the backend registration port, and the NLB health-check port for the
+associated backend set. CAPOCI does not reconfigure the kube-apiserver, bootstrap data, or node networking to make a
+new port serve traffic automatically.
+
+When `backendSets` is empty, CAPOCI preserves the legacy single-backend-set behavior and uses
+`backendSetDetails` as before. When `backendSets` is present, configure backend-set details per entry and keep the
+legacy `backendSetDetails` block unset.
+
+For non-default explicit listener ports, use user-managed networking or custom NSG/security-list rules so the control
+plane endpoint subnet and control plane nodes permit the same port. Managed networking does not automatically open new
+API server listener ports in this phase.
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: OCICluster
+metadata:
+  name: "${CLUSTER_NAME}"
+spec:
+  compartmentId: "${OCI_COMPARTMENT_ID}"
+  networkSpec:
+    apiServerLoadBalancer:
+      nlbSpec:
+        backendSets:
+          - name: apiserver-lb-backendset
+            backendSetDetails:
+              healthChecker:
+                urlPath: /healthz
+          - name: apiserver-secondary
+            listenerPort: 7443
+            backendSetDetails:
+              healthChecker:
+                urlPath: /healthz
+```
+
+The example above only shows the CAPOCI NLB contract. Use a secondary `listenerPort` only when your control plane
+bootstrap/runtime configuration is already serving Kubernetes API traffic on that same port.
+
 ## Example spec to use custom role
 
 CAPOCI can be used to create Subnet/NSG in the VCN for custom workloads such as private load balancers,

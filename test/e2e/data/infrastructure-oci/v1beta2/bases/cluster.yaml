@@ -34,6 +34,10 @@ metadata:
   name: "${CLUSTER_NAME}"
 spec:
   compartmentId: "${OCI_COMPARTMENT_ID}"
+  # backendSets/listenerPort are NLB-only in this phase.
+  # CAPOCI configures the NLB listeners, backend registration, and health-check ports only.
+  # Non-default listenerPort values require user-managed networking or custom NSG/security-list rules,
+  # and the control plane must already be serving traffic on those ports.
 ---
 kind: KubeadmControlPlane
 apiVersion: controlplane.cluster.x-k8s.io/v1beta1

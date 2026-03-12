@@ -2416,6 +2416,76 @@ func TestNLBReconciliationDeletion(t *testing.T) {
 	}
 }
 
+func TestNLBReconciliationCreationRemovesStaleBackendMembership(t *testing.T) {
+	g := NewWithT(t)
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	nlbClient := mock_nlb.NewMockNetworkLoadBalancerClient(mockCtrl)
+	wrClient := mock_workrequests.NewMockClient(mockCtrl)
+	client := fake.NewClientBuilder().WithObjects().Build()
+	ociCluster := infrastructurev1beta2.OCICluster{
+		ObjectMeta: metav1.ObjectMeta{UID: "uid"},
+	}
+	ociCluster.Spec.NetworkSpec.APIServerLB.LoadBalancerId = common.String("nlbid")
+	ociCluster.Spec.NetworkSpec.APIServerLB.NLBSpec.BackendSets = []infrastructurev1beta2.BackendSet{
+		{Name: APIServerLBBackendSetName},
+	}
+
+	ms, err := NewMachineScope(MachineScopeParams{
+		NetworkLoadBalancerClient: nlbClient,
+		WorkRequestsClient:        wrClient,
+		OCIMachine: &infrastructurev1beta2.OCIMachine{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", UID: "uid"},
+			Spec:       infrastructurev1beta2.OCIMachineSpec{CompartmentId: "test"},
+		},
+		Machine: &clusterv1.Machine{},
+		Cluster: &clusterv1.Cluster{},
+		OCIClusterAccessor: OCISelfManagedCluster{
+			OCICluster: &ociCluster,
+		},
+		Client: client,
+	})
+	g.Expect(err).To(BeNil())
+	ms.Machine.Namespace = "default"
+	ms.OCIMachine.Status.Addresses = []clusterv1beta1.MachineAddress{
+		{Type: clusterv1beta1.MachineInternalIP, Address: "1.1.1.1"},
+	}
+
+	nlbClient.EXPECT().GetNetworkLoadBalancer(gomock.Any(), gomock.Eq(networkloadbalancer.GetNetworkLoadBalancerRequest{
+		NetworkLoadBalancerId: common.String("nlbid"),
+	})).Return(networkloadbalancer.GetNetworkLoadBalancerResponse{
+		NetworkLoadBalancer: networkloadbalancer.NetworkLoadBalancer{
+			BackendSets: map[string]networkloadbalancer.BackendSet{
+				APIServerLBBackendSetName: {
+					Name: common.String(APIServerLBBackendSetName),
+					Backends: []networkloadbalancer.Backend{
+						{Name: common.String("test")},
+					},
+				},
+				"stale-secondary": {
+					Name: common.String("stale-secondary"),
+					Backends: []networkloadbalancer.Backend{
+						{Name: common.String("test")},
+					},
+				},
+			},
+		},
+	}, nil)
+	nlbClient.EXPECT().DeleteBackend(gomock.Any(), gomock.Eq(networkloadbalancer.DeleteBackendRequest{
+		NetworkLoadBalancerId: common.String("nlbid"),
+		BackendSetName:        common.String("stale-secondary"),
+		BackendName:           common.String("test"),
+	})).Return(networkloadbalancer.DeleteBackendResponse{OpcWorkRequestId: common.String("wrid")}, nil)
+	nlbClient.EXPECT().GetWorkRequest(gomock.Any(), gomock.Eq(networkloadbalancer.GetWorkRequestRequest{
+		WorkRequestId: common.String("wrid"),
+	})).Return(networkloadbalancer.GetWorkRequestResponse{
+		WorkRequest: networkloadbalancer.WorkRequest{Status: networkloadbalancer.OperationStatusSucceeded},
+	}, nil)
+
+	g.Expect(ms.ReconcileCreateInstanceOnLB(context.Background())).To(Succeed())
+}
+
 func TestLBReconciliationCreation(t *testing.T) {
 	var (
 		ms         *MachineScope
