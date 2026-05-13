@@ -28,6 +28,8 @@ spec:
   version: "${OCI_MANAGED_KUBERNETES_VERSION}"
   nodeShape: "${OCI_MANAGED_NODE_SHAPE}"
   sshPublicKey: "${OCI_SSH_KEY}"
+  nodeMetadata:
+    areLegacyImdsEndpointsDisabled: "true"
   nodeSourceViaImage:
     bootVolumeSizeInGBs: 50
   nodeShapeConfig:
