@@ -191,6 +191,9 @@ func makeOCIMachineTemplate(namespace, name string) *infrastructurev1beta1.OCIMa
 				Spec: infrastructurev1beta1.OCIMachineSpec{
 					ImageId: os.Getenv("OCI_UPGRADE_IMAGE_ID"),
 					Shape:   os.Getenv("OCI_NODE_MACHINE_TYPE"),
+					InstanceOptions: &infrastructurev1beta1.InstanceOptions{
+						AreLegacyImdsEndpointsDisabled: pointer.BoolPtr(true),
+					},
 					ShapeConfig: infrastructurev1beta1.ShapeConfig{
 						Ocpus: "1",
 					},
