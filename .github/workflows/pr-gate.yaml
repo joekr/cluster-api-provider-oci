@@ -50,8 +50,8 @@ jobs:
       - name: Run make build
         run: |
           set +e
-          make build > .pr-gate/make-build.log 2>&1
-          status=$?
+          make build 2>&1 | tee .pr-gate/make-build.log
+          status=${PIPESTATUS[0]}
           if [ "${status}" -eq 0 ]; then
             printf 'make build\tPASS\tBuild completed\n' >> .pr-gate/results.tsv
           else
@@ -65,8 +65,8 @@ jobs:
       - name: Run make test
         run: |
           set +e
-          make test > .pr-gate/make-test.log 2>&1
-          status=$?
+          make test 2>&1 | tee .pr-gate/make-test.log
+          status=${PIPESTATUS[0]}
           if [ "${status}" -eq 0 ]; then
             printf 'make test\tPASS\tUnit tests completed\n' >> .pr-gate/results.tsv
           else
@@ -81,11 +81,11 @@ jobs:
         run: |
           set +e
 
-          make generate > .pr-gate/make-generate.log 2>&1
-          generate_status=$?
+          make generate 2>&1 | tee .pr-gate/make-generate.log
+          generate_status=${PIPESTATUS[0]}
 
-          make manifests > .pr-gate/make-manifests.log 2>&1
-          manifests_status=$?
+          make manifests 2>&1 | tee .pr-gate/make-manifests.log
+          manifests_status=${PIPESTATUS[0]}
 
           if [ "${generate_status}" -ne 0 ]; then
             touch .pr-gate/failed
@@ -131,8 +131,8 @@ jobs:
         run: |
           set +e
 
-          make generate-e2e-templates > .pr-gate/make-generate-e2e-templates.log 2>&1
-          template_status=$?
+          make generate-e2e-templates 2>&1 | tee .pr-gate/make-generate-e2e-templates.log
+          template_status=${PIPESTATUS[0]}
 
           if [ "${template_status}" -ne 0 ]; then
             touch .pr-gate/failed
