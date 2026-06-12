@@ -1,0 +1,254 @@
+name: PR Gate
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+
+# Additional local-only checks considered but not enforced by this first gate:
+# - make lint
+# - go mod tidy followed by git diff --exit-code -- go.mod go.sum
+# - make build-book for docs/book changes
+
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  local-checks:
+    name: Local checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      report: ${{ steps.final-report.outputs.report }}
+      result: ${{ steps.final-report.outputs.result }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: "1.24.3"
+          cache: true
+
+      - name: Initialize report
+        run: |
+          mkdir -p .pr-gate
+          printf 'Check\tResult\tDetails\n' > .pr-gate/results.tsv
+
+      - name: Run make build
+        run: |
+          set +e
+          make build 2>&1 | tee .pr-gate/make-build.log
+          status=${PIPESTATUS[0]}
+          if [ "${status}" -eq 0 ]; then
+            printf 'make build\tPASS\tBuild completed\n' >> .pr-gate/results.tsv
+          else
+            touch .pr-gate/failed
+            printf 'make build\tFAIL\tExit code %s\n' "${status}" >> .pr-gate/results.tsv
+            echo "::group::make build output"
+            tail -n 120 .pr-gate/make-build.log
+            echo "::endgroup::"
+          fi
+
+      - name: Run make test
+        run: |
+          set +e
+          make test 2>&1 | tee .pr-gate/make-test.log
+          status=${PIPESTATUS[0]}
+          if [ "${status}" -eq 0 ]; then
+            printf 'make test\tPASS\tUnit tests completed\n' >> .pr-gate/results.tsv
+          else
+            touch .pr-gate/failed
+            printf 'make test\tFAIL\tExit code %s\n' "${status}" >> .pr-gate/results.tsv
+            echo "::group::make test output"
+            tail -n 120 .pr-gate/make-test.log
+            echo "::endgroup::"
+          fi
+
+      - name: Check generated API and manifests
+        run: |
+          set +e
+
+          make generate 2>&1 | tee .pr-gate/make-generate.log
+          generate_status=${PIPESTATUS[0]}
+
+          make manifests 2>&1 | tee .pr-gate/make-manifests.log
+          manifests_status=${PIPESTATUS[0]}
+
+          if [ "${generate_status}" -ne 0 ]; then
+            touch .pr-gate/failed
+            printf 'make generate\tFAIL\tExit code %s\n' "${generate_status}" >> .pr-gate/results.tsv
+            echo "::group::make generate output"
+            tail -n 120 .pr-gate/make-generate.log
+            echo "::endgroup::"
+          else
+            printf 'make generate\tPASS\tGenerated code completed\n' >> .pr-gate/results.tsv
+          fi
+
+          if [ "${manifests_status}" -ne 0 ]; then
+            touch .pr-gate/failed
+            printf 'make manifests\tFAIL\tExit code %s\n' "${manifests_status}" >> .pr-gate/results.tsv
+            echo "::group::make manifests output"
+            tail -n 120 .pr-gate/make-manifests.log
+            echo "::endgroup::"
+          else
+            printf 'make manifests\tPASS\tManifest generation completed\n' >> .pr-gate/results.tsv
+          fi
+
+          if [ "${generate_status}" -eq 0 ] && [ "${manifests_status}" -eq 0 ]; then
+            git diff --stat -- api exp/api config/crd config/rbac config/webhook config/default > .pr-gate/generated-diff-stat.log
+            git diff --exit-code -- api exp/api config/crd config/rbac config/webhook config/default > .pr-gate/generated-diff.log 2>&1
+            diff_status=$?
+            if [ "${diff_status}" -eq 0 ]; then
+              printf 'generated API and manifests\tPASS\tGenerated artifacts are current\n' >> .pr-gate/results.tsv
+            else
+              touch .pr-gate/failed
+              printf 'generated API and manifests\tFAIL\tGenerated artifacts changed; see workflow logs\n' >> .pr-gate/results.tsv
+              echo "::group::generated API and manifests diff"
+              cat .pr-gate/generated-diff-stat.log
+              echo
+              sed -n '1,200p' .pr-gate/generated-diff.log
+              echo "::endgroup::"
+            fi
+          else
+            touch .pr-gate/failed
+            printf 'generated API and manifests\tFAIL\tSkipped diff because generation failed\n' >> .pr-gate/results.tsv
+          fi
+
+      - name: Check generated e2e templates
+        run: |
+          set +e
+
+          make generate-e2e-templates 2>&1 | tee .pr-gate/make-generate-e2e-templates.log
+          template_status=${PIPESTATUS[0]}
+
+          if [ "${template_status}" -ne 0 ]; then
+            touch .pr-gate/failed
+            printf 'make generate-e2e-templates\tFAIL\tExit code %s\n' "${template_status}" >> .pr-gate/results.tsv
+            echo "::group::make generate-e2e-templates output"
+            tail -n 120 .pr-gate/make-generate-e2e-templates.log
+            echo "::endgroup::"
+          else
+            printf 'make generate-e2e-templates\tPASS\tE2E template generation completed\n' >> .pr-gate/results.tsv
+            git diff --stat -- test/e2e/data/infrastructure-oci > .pr-gate/e2e-template-diff-stat.log
+            git diff --exit-code -- test/e2e/data/infrastructure-oci > .pr-gate/e2e-template-diff.log 2>&1
+            diff_status=$?
+            if [ "${diff_status}" -eq 0 ]; then
+              printf 'generated e2e templates\tPASS\tE2E templates are current\n' >> .pr-gate/results.tsv
+            else
+              touch .pr-gate/failed
+              printf 'generated e2e templates\tFAIL\tGenerated e2e templates changed; see workflow logs\n' >> .pr-gate/results.tsv
+              echo "::group::generated e2e templates diff"
+              cat .pr-gate/e2e-template-diff-stat.log
+              echo
+              sed -n '1,200p' .pr-gate/e2e-template-diff.log
+              echo "::endgroup::"
+            fi
+          fi
+
+      - name: Finalize report
+        id: final-report
+        if: ${{ always() }}
+        run: |
+          if [ ! -f .pr-gate/results.tsv ]; then
+            mkdir -p .pr-gate
+            printf 'Check\tResult\tDetails\n' > .pr-gate/results.tsv
+            printf 'workflow setup\tFAIL\tCheckout or setup failed before checks ran\n' >> .pr-gate/results.tsv
+            touch .pr-gate/failed
+          fi
+
+          {
+            echo "## PR Gate"
+            echo
+            echo "Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo "| Check | Result | Details |"
+            echo "| --- | --- | --- |"
+            tail -n +2 .pr-gate/results.tsv | while IFS=$'\t' read -r check result details; do
+              printf '| `%s` | %s | %s |\n' "${check}" "${result}" "${details}"
+            done
+          } > .pr-gate/report.md
+
+          cat .pr-gate/report.md >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ -f .pr-gate/failed ]; then
+            echo "result=failure" >> "${GITHUB_OUTPUT}"
+          else
+            echo "result=success" >> "${GITHUB_OUTPUT}"
+          fi
+
+          {
+            echo "report<<PR_GATE_REPORT_EOF"
+            cat .pr-gate/report.md
+            echo "PR_GATE_REPORT_EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+          if [ -f .pr-gate/failed ]; then
+            exit 1
+          fi
+
+  pr-comment:
+    name: PR comment
+    needs:
+      - local-checks
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Upsert PR gate comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          REPORT: ${{ needs.local-checks.outputs.report }}
+        run: |
+          marker='<!-- capoci-pr-gate-report -->'
+          body_file="${RUNNER_TEMP}/pr-gate-comment.md"
+          comments_file="${RUNNER_TEMP}/pr-gate-comments.json"
+          error_file="${RUNNER_TEMP}/pr-gate-comment.error"
+          payload_file="${RUNNER_TEMP}/pr-gate-comment.json"
+
+          {
+            echo "${marker}"
+            if [ -n "${REPORT}" ]; then
+              printf '%s\n' "${REPORT}"
+            else
+              echo "## PR Gate"
+              echo
+              echo "PR gate did not produce a report. Check the workflow logs."
+            fi
+          } > "${body_file}"
+
+          jq -n --rawfile body "${body_file}" '{body: $body}' > "${payload_file}"
+
+          if ! gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" > "${comments_file}" 2> "${error_file}"; then
+            echo "::notice::Skipping PR gate comment because existing comments could not be listed."
+            cat "${error_file}"
+            exit 0
+          fi
+
+          comment_id="$(jq -r '.[] | select(.body | startswith("<!-- capoci-pr-gate-report -->")) | .id' "${comments_file}" | head -n 1)"
+
+          if [ -n "${comment_id}" ]; then
+            if ! gh api --method PATCH "repos/${REPO}/issues/comments/${comment_id}" --input "${payload_file}"; then
+              echo "::notice::Skipping PR gate comment update because the GitHub API rejected the request."
+            fi
+          else
+            if ! gh api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" --input "${payload_file}"; then
+              echo "::notice::Skipping PR gate comment creation because the GitHub API rejected the request."
+            fi
+          fi
