@@ -34,4 +34,4 @@ jobs:
         with:
           repo_path: ./
           policy_file: check-github-actions
-          policy_purl: pkg:github.com/oracle/cluster-api-provider-oci@.*
+          policy_purl: pkg:github.com/${{ github.repository }}@.*
