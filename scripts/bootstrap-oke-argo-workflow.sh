@@ -127,10 +127,22 @@ verify_cluster_access() {
   kubectl --context "${KUBE_CONTEXT}" cluster-info >/dev/null
 }
 
-apply_manifest() {
+apply_manifest() (
+  local install_dir manifest
+  install_dir="$(mktemp -d)"
+  trap 'rm -rf "${install_dir}"' EXIT
+
+  manifest="${ARGO_INSTALL_MANIFEST}"
+  if [[ -f "${manifest}" ]]; then
+    manifest="$(cd "$(dirname "${manifest}")" && pwd)/$(basename "${manifest}")"
+  fi
+  cp "${REPO_ROOT}/argo/minio-kustomization.yaml" "${install_dir}/kustomization.yaml"
+  printf "resources:\n- '%s'\n" "${manifest//\'/\'\'}" >> "${install_dir}/kustomization.yaml"
+
   log "Applying manifest: ${ARGO_INSTALL_MANIFEST}"
-  kubectl --context "${KUBE_CONTEXT}" -n "${ARGO_NAMESPACE}" apply -f "${ARGO_INSTALL_MANIFEST}"
-}
+  kubectl --context "${KUBE_CONTEXT}" kustomize "${install_dir}" --load-restrictor=LoadRestrictionsNone \
+    | kubectl --context "${KUBE_CONTEXT}" -n "${ARGO_NAMESPACE}" apply -f -
+)
 
 ensure_namespace() {
   log "Ensuring namespace '${ARGO_NAMESPACE}' exists."
