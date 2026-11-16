@@ -34,7 +34,7 @@ jobs:
           platforms: arm64
 
       - name: Build Release Artifacts
-        run: RELEASE_TAG="${{ github.ref_name }}" make release
+        run: RELEASE_TAG="${{ github.ref_name }}" make release PROD_REGISTRY=ghcr.io/joekr
 
       - name: Update crds docs
         run: |
